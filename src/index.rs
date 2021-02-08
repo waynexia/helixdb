@@ -1,30 +1,28 @@
 use crate::entry::{Bytes, Entry, Timestamp};
 use crate::error::Result;
-use crate::io_worker::{IOWorker, ValuePosition};
 
-use std::collections::BTreeMap;
+use std::collections::{btree_map, BTreeMap};
 
+#[derive(Default, Debug)]
 pub struct MemIndex {
-    pub index: BTreeMap<(Timestamp, Bytes), ValuePosition>,
-    pub worker: IOWorker,
+    pub index: BTreeMap<(Timestamp, Bytes), u64>,
 }
 
 impl MemIndex {
-    pub fn put(&mut self, write_batch: Vec<Entry>) -> Result<()> {
-        let indices = self.worker.write(write_batch)?;
-        for (timestamp, key, position) in indices {
-            self.index.insert((timestamp, key), position);
+    pub fn insert_entries(&mut self, entries: Vec<(Timestamp, Bytes, u64)>) -> Result<()> {
+        for entry in entries {
+            let (timestamp, key, value) = entry;
+            self.index.insert((timestamp, key), value);
         }
 
         Ok(())
     }
 
-    pub fn get(&mut self, timestamp: Timestamp, key: Bytes) -> Result<Option<Entry>> {
-        if let Some(position) = self.index.get(&(timestamp, key)) {
-            let result = self.worker.read(position)?;
-            Ok(result)
-        } else {
-            Ok(None)
-        }
+    pub fn get(&self, time_key: &(Timestamp, Bytes)) -> Result<Option<u64>> {
+        Ok(self.index.get(time_key).copied())
+    }
+
+    pub fn into_iter(self) -> btree_map::IntoIter<(i64, std::vec::Vec<u8>), u64> {
+        self.index.into_iter()
     }
 }

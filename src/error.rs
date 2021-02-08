@@ -9,4 +9,6 @@ pub enum HelixError {
     IO(#[from] io::Error),
     #[error("common HelixDB error")]
     Common,
+    #[error("element not found")]
+    NotFound,
 }
