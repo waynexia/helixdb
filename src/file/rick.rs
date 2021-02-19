@@ -100,7 +100,7 @@ impl Rick {
         // todo: handle incomplete entry. maybe add a "safe point" record?
         self.file.seek(SeekFrom::Start(0))?;
 
-        let mut indice = BTreeMap::new();
+        let mut indices = BTreeMap::new();
         let mut prefix_buf = [0; Entry::prefix_length()];
         let mut offset = 0;
 
@@ -113,12 +113,12 @@ impl Rick {
                 .read(&mut offload_buf)
                 .expect("fail to read offload");
             let entry = Entry::decode(offload_buf, &prefix);
-            indice.insert((prefix.timestamp, entry.key), offset as u64);
+            indices.insert((prefix.timestamp, entry.key), offset as u64);
             offset += Entry::prefix_length() + read_length;
         }
 
-        let mem_indix = MemIndex { index: indice };
-        Ok(mem_indix)
+        let mem_index = MemIndex { index: indices };
+        Ok(mem_index)
     }
 
     pub fn sync(&self) -> Result<()> {

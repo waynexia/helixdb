@@ -5,13 +5,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::error::Result;
 
 const COMMON_FILE_PREFIX: &str = "helix";
-const COMMON_FILE_EXTENTION: &str = "hlx";
+const COMMON_FILE_EXTENSION: &str = "hlx";
 
 pub enum FileType {
     Rick,
     VLog,
     SSTable,
-    Manifist,
+    Manifest,
 }
 
 impl FileType {
@@ -20,7 +20,7 @@ impl FileType {
             FileType::Rick => "rick",
             FileType::VLog => "vlog",
             FileType::SSTable => "sst",
-            FileType::Manifist => "manifist",
+            FileType::Manifest => "manifest",
         }
     }
 }
@@ -39,7 +39,7 @@ impl FileManager {
     }
 
     /// filename is consist of general prefix, file type and creating timestamp.
-    /// For example, `helix-manifist-160000000.hlx`
+    /// For example, `helix-manifest-160000000.hlx`
     pub fn create(&self, ty: FileType) -> Result<(File, String)> {
         let filename = self.base_dir.join(format!(
             "{}-{}-{}.{}",
@@ -49,7 +49,7 @@ impl FileManager {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs(),
-            COMMON_FILE_EXTENTION
+            COMMON_FILE_EXTENSION
         ));
 
         let file = File::with_options()
@@ -78,7 +78,7 @@ impl FileManager {
             .open(filename)?)
     }
 
-    /// Initialize / recover manager's state from manifist file.
+    /// Initialize / recover manager's state from manifest file.
     fn init() -> Result<()> {
         todo!()
     }
@@ -95,7 +95,7 @@ mod test {
         let base_dir = tempdir().unwrap();
 
         let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
-        let _ = file_manager.create(FileType::Manifist).unwrap();
+        let _ = file_manager.create(FileType::Manifest).unwrap();
         assert_eq!(base_dir.path().read_dir().unwrap().count(), 1);
     }
 }

@@ -58,8 +58,8 @@ impl Levels {
             .unwrap()
             .timestamp;
 
-        let indice = self.rick.write(entries)?;
-        self.memindex.insert_entries(indice)?;
+        let indices = self.rick.write(entries)?;
+        self.memindex.insert_entries(indices)?;
 
         // review timestamp and handle actions.
         let review_actions = self

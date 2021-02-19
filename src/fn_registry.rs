@@ -50,7 +50,7 @@ pub type CompressDispatchFn = Arc<dyn Fn(&Bytes) -> &str + Send + Sync>;
 /// Dispatch key to different shards. Called "sharding a key".
 ///
 /// Input type is a reference to a key in `Bytes` and output is which shard this
-/// key belones to.
+/// key belongs to.
 pub type ShardingKeyFn = Arc<dyn Fn(&Bytes) -> usize + Send + Sync>;
 
 pub struct FnRegistry {
@@ -103,7 +103,7 @@ pub fn noop_dispatch_fn() -> CompressDispatchFn {
     Arc::new(|_| "noop")
 }
 
-/// A No-Op compress funcion.
+/// A No-Op compress function.
 ///
 /// Compress: first put all entries' bytes together. Then followed a block of bytes records
 /// each entry's length in u64. The last 8 bytes is how many entries sited.
@@ -115,7 +115,7 @@ pub fn noop_udcf() -> UDCF {
     let compress_fn: CompressFn = Arc::new(|_key, ts_values| {
         let value_num = ts_values.len() as u64;
 
-        // concat timstamp and value together.
+        // concat timestamp and value together.
         let ts_values: Vec<Bytes> = ts_values
             .into_iter()
             .map(|(ts, mut value)| {
@@ -166,8 +166,8 @@ pub fn noop_udcf() -> UDCF {
             let mut ts_value_bytes: Vec<u8> = raw_values.drain(len - length..).collect();
             len -= length;
             let value_bytes = ts_value_bytes.drain(TIMESTAMP_SIZE..).collect();
-            let timstamp = Timestamp::from_le_bytes(ts_value_bytes.try_into().unwrap());
-            values.push_front((timstamp, value_bytes));
+            let timestamp = Timestamp::from_le_bytes(ts_value_bytes.try_into().unwrap());
+            values.push_front((timestamp, value_bytes));
         }
 
         // convert VecDeque to Vec.
