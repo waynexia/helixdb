@@ -6,6 +6,8 @@ edition = "2018"
 
 [dependencies]
 thiserror = "1.0"
+protos = { path = "protos" }
+flatbuffers = "0.7.0"
 
 [dev-dependencies]
 tempfile = "3.2"

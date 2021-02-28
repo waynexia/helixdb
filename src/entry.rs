@@ -1,14 +1,12 @@
-use core::time;
-use std::io::Write;
-use std::mem::{self, size_of};
-use std::sync::Arc;
+use flatbuffers::FlatBufferBuilder;
+use std::{convert::TryInto, mem};
+
+use protos::{Entry as FB_Entry, EntryArgs, Timestamp as FB_Timestamp};
 
 pub type Bytes = Vec<u8>;
 pub type Timestamp = i64;
 
-/// Binary format:
-///
-/// | timestamp (8B) | key size (8B) | value size (8B) | key (key size) | value (value size) |
+/// Wrapper struct over protos::Entry.
 ///
 /// C representation is needed to converting `(&ts, &key)` to `&(ts, key)`.
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -20,34 +18,33 @@ pub struct Entry {
 }
 
 impl Entry {
-    /// `value` will be consumed
-    pub fn encode(&mut self) -> Bytes {
-        // key, value, key size, value size, timestamp
-        let len = self.key.len() + self.value.len() + size_of::<u64>() * 3;
-        let mut buf = Vec::with_capacity(len);
-        buf.extend_from_slice(&self.timestamp.to_le_bytes());
-        buf.extend_from_slice(&self.key.len().to_le_bytes());
-        buf.extend_from_slice(&self.value.len().to_le_bytes());
-        buf.append(&mut self.key.clone());
-        buf.append(&mut self.value);
+    pub fn encode(&self) -> Bytes {
+        let mut fbb = FlatBufferBuilder::new();
 
-        buf
+        let timestamp = FB_Timestamp::new(self.timestamp);
+        let key_bytes = fbb.create_vector_direct(&self.key);
+        let value_bytes = fbb.create_vector_direct(&self.value);
+
+        let entry = FB_Entry::create(
+            &mut fbb,
+            &EntryArgs {
+                timestamp: Some(&timestamp),
+                key: Some(key_bytes),
+                value: Some(value_bytes),
+            },
+        );
+
+        fbb.finish(entry, None);
+        fbb.finished_data().to_vec()
     }
 
-    pub const fn prefix_length() -> usize {
-        8 * 3
-    }
-
-    pub fn decode(mut bytes: Bytes, prefix: &EntryPrefix) -> Self {
-        debug_assert_eq!(bytes.len(), prefix.key_length + prefix.value_length);
-
-        let key = bytes.drain(..prefix.key_length).collect();
-        let value = bytes;
+    pub fn decode(bytes: &Bytes) -> Self {
+        let fb_entry = protos::get_root_as_entry(&bytes);
 
         Self {
-            timestamp: prefix.timestamp,
-            key,
-            value,
+            timestamp: fb_entry.timestamp().timestamp(),
+            key: fb_entry.key().to_vec(),
+            value: fb_entry.value().to_vec(),
         }
     }
 
@@ -76,20 +73,27 @@ impl From<(Timestamp, Bytes, Bytes)> for Entry {
     }
 }
 
-#[repr(C)]
-pub struct EntryPrefix {
-    pub timestamp: Timestamp,
-    pub key_length: usize,
-    pub value_length: usize,
+/// Describe a encoded [Entry]'s buffer.
+pub(crate) struct EntryMeta {
+    pub length: u64,
 }
 
-impl EntryPrefix {
-    pub fn from_bytes(bytes: [u8; Entry::prefix_length()]) -> Self {
-        debug_assert_eq!(std::mem::size_of::<EntryPrefix>(), Entry::prefix_length());
-        unsafe { mem::transmute(bytes) }
+impl EntryMeta {
+    pub fn new(length: u64) -> Self {
+        Self { length }
     }
 
-    pub fn offload_length(&self) -> usize {
-        self.key_length + self.value_length
+    pub const fn meta_size() -> usize {
+        mem::size_of::<Self>()
+    }
+
+    pub fn encode(&self) -> [u8; 8] {
+        self.length.to_le_bytes()
+    }
+
+    pub fn decode(bytes: &[u8]) -> Self {
+        Self {
+            length: u64::from_le_bytes(bytes.try_into().unwrap()),
+        }
     }
 }

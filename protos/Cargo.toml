@@ -1,0 +1,9 @@
+[package]
+name = "protos"
+version = "0.1.0"
+authors = ["Ruihang Xia <waynestxia@gmail.com>"]
+edition = "2018"
+description = "Generated rust flatbuffer code."
+
+[dependencies]
+flatbuffers = "0.7.0"

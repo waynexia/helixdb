@@ -1,10 +1,11 @@
-use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
+use std::{collections::BTreeMap, usize};
 
-use crate::entry::{Bytes, Entry, EntryPrefix, Timestamp};
+use crate::entry::{Bytes, Entry, EntryMeta, Timestamp};
 use crate::error::Result;
 use crate::index::MemIndex;
+// use protos::Entry;
 
 /// Handles to entries in rick (level 0).
 pub struct Rick {
@@ -19,11 +20,14 @@ impl Rick {
         let mut positions = Vec::with_capacity(entries.len());
         let mut file_length = self.file.seek(SeekFrom::End(0))?;
 
-        for mut entry in entries {
+        // todo: does encode each entries separately bring too much overhead?
+        for entry in entries {
             let bytes = entry.encode();
-            let wrote = self.file.write(&bytes)? as u64;
+            let length = EntryMeta::new(bytes.len() as u64).encode();
+            let mut wrote = self.file.write(&length)?;
+            wrote += self.file.write(&bytes)?;
             positions.push((entry.timestamp, entry.key, file_length));
-            file_length += wrote;
+            file_length += wrote as u64;
         }
 
         self.sync()?;
@@ -39,18 +43,20 @@ impl Rick {
     pub fn read(&mut self, offset: u64) -> Result<Entry> {
         self.file.seek(SeekFrom::Start(offset))?;
 
-        let mut prefix_buf = [0; Entry::prefix_length()];
-        let read_length = self.file.read(&mut prefix_buf)?;
-        debug_assert_eq!(read_length, Entry::prefix_length());
+        let mut meta_buf = [0; EntryMeta::meta_size()];
+        let read_length = self.file.read(&mut meta_buf)?;
+        debug_assert_eq!(read_length, EntryMeta::meta_size());
+        let meta = EntryMeta::decode(&meta_buf);
 
-        let prefix = EntryPrefix::from_bytes(prefix_buf);
-        let offload_length = prefix.offload_length();
+        // let prefix = EntryPrefix::from_bytes(prefix_buf);
+        // let offload_length = prefix.offload_length();
 
+        let offload_length = meta.length as usize;
         let mut offload_buf = vec![0; offload_length];
         let read_length = self.file.read(&mut offload_buf)?;
         debug_assert_eq!(read_length, offload_length);
 
-        Ok(Entry::decode(offload_buf, &prefix))
+        Ok(Entry::decode(&offload_buf))
     }
 
     /// Read all keys
@@ -58,17 +64,17 @@ impl Rick {
         self.file.seek(SeekFrom::Start(0))?;
 
         let mut keys = vec![];
-        let mut prefix_buf = [0; Entry::prefix_length()];
+        let mut prefix_buf = [0; EntryMeta::meta_size()];
 
         while self.file.read(&mut prefix_buf).is_ok() {
-            let prefix = EntryPrefix::from_bytes(prefix_buf);
-            let offload_length = prefix.offload_length();
+            let meta = EntryMeta::decode(&prefix_buf);
+            let offload_length = meta.length as usize;
             let mut offload_buf = vec![0; offload_length];
             let _ = self
                 .file
                 .read(&mut offload_buf)
                 .expect("fail to read offload");
-            let entry = Entry::decode(offload_buf, &prefix);
+            let entry = Entry::decode(&offload_buf);
             keys.push(entry.key);
         }
 
@@ -78,17 +84,17 @@ impl Rick {
     pub fn entry_list(&mut self) -> Result<Vec<Entry>> {
         self.file.seek(SeekFrom::Start(0))?;
         let mut entries = vec![];
-        let mut prefix_buf = [0; Entry::prefix_length()];
+        let mut prefix_buf = [0; EntryMeta::meta_size()];
 
         while self.file.read(&mut prefix_buf).is_ok() {
-            let prefix = EntryPrefix::from_bytes(prefix_buf);
-            let offload_length = prefix.offload_length();
+            let meta = EntryMeta::decode(&prefix_buf);
+            let offload_length = meta.length as usize;
             let mut offload_buf = vec![0; offload_length];
             let _ = self
                 .file
                 .read(&mut offload_buf)
                 .expect("fail to read offload");
-            let entry = Entry::decode(offload_buf, &prefix);
+            let entry = Entry::decode(&offload_buf);
             entries.push(entry);
         }
 
@@ -97,24 +103,24 @@ impl Rick {
 
     /// Scan this rick file and construct its memindex
     pub fn construct_index(&mut self) -> Result<MemIndex> {
-        // todo: handle incomplete entry. maybe add a "safe point" record?
+        // todo: handle incomplete entry.
         self.file.seek(SeekFrom::Start(0))?;
 
         let mut indices = BTreeMap::new();
-        let mut prefix_buf = [0; Entry::prefix_length()];
+        let mut prefix_buf = [0; EntryMeta::meta_size()];
         let mut offset = 0;
 
         while self.file.read(&mut prefix_buf).is_ok() {
-            let prefix = EntryPrefix::from_bytes(prefix_buf);
-            let offload_length = prefix.offload_length();
+            let meta = EntryMeta::decode(&prefix_buf);
+            let offload_length = meta.length as usize;
             let mut offload_buf = vec![0; offload_length];
             let read_length = self
                 .file
                 .read(&mut offload_buf)
                 .expect("fail to read offload");
-            let entry = Entry::decode(offload_buf, &prefix);
-            indices.insert((prefix.timestamp, entry.key), offset as u64);
-            offset += Entry::prefix_length() + read_length;
+            let entry = Entry::decode(&offload_buf);
+            indices.insert((entry.timestamp, entry.key), offset as u64);
+            offset += EntryMeta::meta_size() + read_length;
         }
 
         let mem_index = MemIndex { index: indices };

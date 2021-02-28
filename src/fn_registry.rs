@@ -107,7 +107,7 @@ pub fn noop_dispatch_fn() -> CompressDispatchFn {
 ///
 /// Compress: first put all entries' bytes together. Then followed a block of bytes records
 /// each entry's length in u64. The last 8 bytes is how many entries sited.
-/// ```
+/// ```text
 /// | N var-length bytes | N * u64 for length | N as u64 |
 /// ```
 pub fn noop_udcf() -> UDCF {

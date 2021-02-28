@@ -1,0 +1,14 @@
+namespace Helix;
+
+table Entry {
+    timestamp: Timestamp (required);
+    key: [ubyte] (required);
+    value: [ubyte] (required);
+}
+
+root_type Entry;
+
+// todo: no need?
+struct Timestamp {
+    timestamp: long;
+}

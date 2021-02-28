@@ -1,4 +1,7 @@
-/target
+**/target
 Cargo.lock
 
 .vscode
+
+# flatbuffer generated
+*_generated.rs

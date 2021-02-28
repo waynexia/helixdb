@@ -3,6 +3,7 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::sync::{Arc, Mutex};
 
+// todo: use `bytes` crate.
 use crate::entry::Bytes;
 use crate::error::{HelixError, Result};
 

@@ -3,10 +3,9 @@ use std::convert::TryInto;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::mem::size_of;
-use std::path::Path;
 
 use crate::context::Context;
-use crate::entry::{Bytes, Entry, Timestamp};
+use crate::entry::{Bytes, Timestamp};
 use crate::error::Result;
 use crate::table::TableIterator;
 

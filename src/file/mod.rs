@@ -7,5 +7,3 @@ pub use file_manager::{FileManager, FileType};
 pub use rick::Rick;
 pub use sstable::{SSTable, TableBuilder, TableMeta};
 pub use vlog::{VLog, ValueLogBuilder};
-
-// todo: use flatbuffer for serialization
