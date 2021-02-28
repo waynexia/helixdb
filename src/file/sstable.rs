@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -15,7 +15,7 @@ pub struct SSTable {
 }
 
 impl SSTable {
-    pub fn metadata(&self) -> Result<()> {
+    pub fn metadata(&self) -> Result<TableMeta> {
         todo!()
     }
 
@@ -24,8 +24,8 @@ impl SSTable {
     /// Todo: use trait in std::iter.
     ///
     /// Todo: avoid read all data?
-    pub fn iterator(&mut self, ctx: &Context) -> Result<TableIterator> {
-        let mut index = BTreeMap::<Bytes, (u64, u64)>::new();
+    pub fn iterator<'ctx>(&mut self, ctx: &'ctx Context) -> Result<TableIterator<'ctx>> {
+        let mut index = HashMap::new();
         const PREFIX_LENGTH: usize = 3 * size_of::<u64>();
 
         // get vlog filename
@@ -45,6 +45,8 @@ impl SSTable {
         let data_block_size = data_block_size as usize;
         self.file.seek(SeekFrom::Start(0))?;
 
+        // make key-value index
+        let mut raw_entry_positions = vec![];
         while read_length < data_block_size {
             let mut prefix_buf = vec![0; PREFIX_LENGTH];
             self.file.read_exact(&mut prefix_buf)?;
@@ -64,10 +66,17 @@ impl SSTable {
             self.file.read_exact(&mut key_buf)?;
             read_length += PREFIX_LENGTH * 3 + key_length;
 
-            index.insert(key_buf, (value_offset, value_size));
+            index.insert(key_buf.clone(), raw_entry_positions.len());
+            raw_entry_positions.push((key_buf, value_offset, value_size));
         }
 
-        TableIterator::try_new(index, vlog_filename, ctx)
+        TableIterator::try_new(
+            index,
+            raw_entry_positions,
+            self.metadata()?,
+            vlog_filename,
+            ctx,
+        )
     }
 }
 
@@ -127,5 +136,21 @@ impl From<File> for TableBuilder {
             file,
             entry_buffer: vec![],
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct TableMeta {
+    start_timestamp: Timestamp,
+    end_timestamp: Timestamp,
+}
+
+impl TableMeta {
+    pub fn start(&self) -> Timestamp {
+        self.start_timestamp
+    }
+
+    pub fn end(&self) -> Timestamp {
+        self.end_timestamp
     }
 }

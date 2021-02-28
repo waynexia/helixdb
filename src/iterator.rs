@@ -1,6 +1,7 @@
 use crate::entry::{Bytes, Timestamp};
 use crate::error::Result;
 
+// todo: make `value()` returns reference
 pub trait Iterator {
     fn seek(&mut self, timestamp: Timestamp, key: Bytes) -> Result<()>;
 
@@ -11,4 +12,6 @@ pub trait Iterator {
     fn key(&self) -> Result<&Bytes>;
 
     fn value(&self) -> Result<Bytes>;
+
+    fn is_valid(&self) -> bool;
 }
