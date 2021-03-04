@@ -2,9 +2,9 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::{collections::BTreeMap, usize};
 
-use crate::entry::{Bytes, Entry, EntryMeta, Timestamp};
 use crate::error::Result;
 use crate::index::MemIndex;
+use crate::types::{Bytes, Entry, EntryMeta, Timestamp};
 // use protos::Entry;
 
 /// Handles to entries in rick (level 0).
@@ -47,9 +47,6 @@ impl Rick {
         let read_length = self.file.read(&mut meta_buf)?;
         debug_assert_eq!(read_length, EntryMeta::meta_size());
         let meta = EntryMeta::decode(&meta_buf);
-
-        // let prefix = EntryPrefix::from_bytes(prefix_buf);
-        // let offload_length = prefix.offload_length();
 
         let offload_length = meta.length as usize;
         let mut offload_buf = vec![0; offload_length];

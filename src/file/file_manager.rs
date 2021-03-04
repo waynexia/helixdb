@@ -1,17 +1,23 @@
 use std::fs::{self, remove_file, File};
+use std::io::Read;
+use std::io::{Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::Result;
+use crate::types::{Bytes, LevelId, LevelInfo, ThreadId};
 
 const COMMON_FILE_PREFIX: &str = "helix";
 const COMMON_FILE_EXTENSION: &str = "hlx";
+
+const LEVEL_INFO_FILENAME: &str = "LEVEL_INFO";
 
 pub enum FileType {
     Rick,
     VLog,
     SSTable,
     Manifest,
+    Others(String),
 }
 
 impl FileType {
@@ -21,8 +27,16 @@ impl FileType {
             FileType::VLog => "vlog",
             FileType::SSTable => "sst",
             FileType::Manifest => "manifest",
+            FileType::Others(name) => name,
         }
     }
+}
+
+pub enum OtherType {
+    /// Timestamp range of each level.
+    LevelInfo,
+    /// Thread Identifier.
+    TId,
 }
 
 pub struct FileManager {
@@ -41,6 +55,10 @@ impl FileManager {
     /// filename is consist of general prefix, file type and creating timestamp.
     /// For example, `helix-manifest-160000000.hlx`
     pub fn create(&self, ty: FileType) -> Result<(File, String)> {
+        if let FileType::Others(filename) = ty {
+            return self.create_others(filename);
+        }
+
         let filename = self.base_dir.join(format!(
             "{}-{}-{}.{}",
             COMMON_FILE_PREFIX,
@@ -63,13 +81,27 @@ impl FileManager {
         Ok((file, filename))
     }
 
+    /// Create files in `Others` type. Like `LEVEL_INFO`.
+    fn create_others(&self, filename: String) -> Result<(File, String)> {
+        let filename = self.base_dir.join(filename);
+        let file = File::with_options()
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .create(true)
+            .open(filename.clone())?;
+        let filename = filename.into_os_string().into_string().unwrap();
+
+        Ok((file, filename))
+    }
+
     pub fn remove<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         remove_file(path)?;
 
         Ok(())
     }
 
-    pub fn open<P: AsRef<Path>>(&self, filename: P) -> Result<File> {
+    pub fn open_<P: AsRef<Path>>(&self, filename: P) -> Result<File> {
         Ok(File::with_options()
             .read(true)
             .write(true)
@@ -78,8 +110,41 @@ impl FileManager {
             .open(filename)?)
     }
 
+    /// open or create required file.
+    pub fn open(&self, tid: ThreadId, ty: FileType) -> Result<File> {
+        todo!()
+    }
+
     /// Initialize / recover manager's state from manifest file.
     fn init() -> Result<()> {
+        todo!()
+    }
+
+    pub fn open_sstable(&self, tid: ThreadId, level_id: LevelId) -> Result<File> {
+        todo!()
+    }
+
+    /// Open or create [LevelInfo].
+    pub fn open_level_info(&self) -> Result<LevelInfo> {
+        let filename = self.base_dir.join(LEVEL_INFO_FILENAME);
+        let mut file = File::with_options()
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .create(true)
+            .open(filename)?;
+
+        // read all
+        let mut buf = vec![];
+        file.seek(SeekFrom::Start(0))?;
+        file.read_to_end(&mut buf)?;
+
+        let level_info = LevelInfo::decode(&buf);
+        Ok(level_info)
+    }
+
+    /// Refresh (overwrite) level info file.
+    fn sync_level_info(&self, bytes: &Bytes) -> Result<()> {
         todo!()
     }
 }

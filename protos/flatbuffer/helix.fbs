@@ -1,14 +1,30 @@
 namespace Helix;
 
 table Entry {
-    timestamp: Timestamp (required);
-    key: [ubyte] (required);
-    value: [ubyte] (required);
+    timestamp: Timestamp ;
+    key: [ubyte];
+    value: [ubyte];
 }
-
-root_type Entry;
 
 // todo: no need?
 struct Timestamp {
     timestamp: long;
+}
+
+struct TimeRange {
+    start: Timestamp;
+    end: Timestamp;
+}
+
+struct LevelId {
+    id: long;
+}
+
+struct LevelDesc {
+    time_range: TimeRange;
+    id: LevelId;
+}
+
+table LevelInfo {
+    infos: [LevelDesc];
 }

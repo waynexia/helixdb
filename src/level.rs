@@ -2,48 +2,54 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::sync::{Arc, Mutex};
 
-use crate::entry::{Bytes, Entry, Timestamp};
-use crate::error::Result;
-use crate::file::{FileManager, FileType, Rick, TableBuilder, ValueLogBuilder};
-use crate::fn_registry::FnRegistry;
+use crate::context::Context;
+use crate::error::{HelixError, Result};
+use crate::file::{FileType, Rick, SSTable, TableBuilder, ValueLogBuilder};
 use crate::index::MemIndex;
+use crate::table::SSTableHandle;
+use crate::types::{Bytes, Entry, LevelInfo, ThreadId, Timestamp};
 
 pub struct LevelConfig {
-    /// Use one file to store non-L0 entries or not.
-    pub sharding_non_l0_file: bool,
+    /// Use one file to store non-Rick (SSTable) entries or not.
+    pub sharding_sstable: bool,
     /// Max levels can hold. This option should be greater than 0.
     /// Levels will be L0 to L`max_level` (inclusive).
+    /// Might be useless due to TimeStamp Reviewer?
     pub max_level: usize,
     /// The max difference of timestamps inside one level.
+    /// Might be useless due to TimeStamp Reviewer?
     pub level_duration: u64,
 }
 
 /// APIs require unique reference (&mut self) because this `Level` is designed to be used
 /// inside one thread (!Send). The fields should also be !Send if possible.
 pub struct Levels {
+    tid: ThreadId,
     // todo: remove this mutex
     timestamp_reviewer: Arc<Mutex<dyn TimestampReviewer>>,
-    fn_registry: FnRegistry,
-    file_manager: Arc<FileManager>,
+    ctx: Arc<Context>,
     memindex: MemIndex,
     rick: Rick,
+    level_info: LevelInfo,
 }
 
 impl Levels {
     pub fn try_new(
+        tid: ThreadId,
         timestamp_reviewer: Arc<Mutex<dyn TimestampReviewer>>,
-        fn_registry: FnRegistry,
-        file_manager: Arc<FileManager>,
+        ctx: Arc<Context>,
     ) -> Result<Self> {
-        let (rick, _) = file_manager.create(FileType::Rick)?;
+        let (rick, _) = ctx.file_manager.create(FileType::Rick)?;
         let rick = Rick::from(rick);
+        let level_info = ctx.file_manager.open_level_info()?;
 
         Ok(Self {
+            tid,
             timestamp_reviewer,
-            fn_registry,
-            file_manager,
+            ctx,
             memindex: MemIndex::default(),
             rick,
+            level_info,
         })
     }
 
@@ -73,6 +79,16 @@ impl Levels {
     }
 
     pub fn get(&mut self, time_key: &(Timestamp, Bytes)) -> Result<Option<Entry>> {
+        let level = self.level_info.find_level(time_key.0);
+        match level {
+            None => Ok(None),
+            Some(0) => self.get_from_rick(time_key),
+            Some(l) => self.get_from_table(time_key, l),
+        }
+    }
+
+    #[inline]
+    fn get_from_rick(&mut self, time_key: &(Timestamp, Bytes)) -> Result<Option<Entry>> {
         if let Some(offset) = self.memindex.get(time_key)? {
             let entry = self.rick.read(offset)?;
 
@@ -82,11 +98,29 @@ impl Levels {
         Ok(None)
     }
 
+    #[inline]
+    fn get_from_table(
+        &mut self,
+        time_key: &(Timestamp, Bytes),
+        level: usize,
+    ) -> Result<Option<Entry>> {
+        let level_id = match self.level_info.get_level_id(time_key.0) {
+            Some(thing) => thing,
+            None => return Ok(None),
+        };
+
+        // todo: cache handle.
+        let table_file = self.ctx.file_manager.open_sstable(self.tid, level_id)?;
+        let handle = SSTable::from(table_file).handle(self.ctx.clone())?;
+
+        handle.get(time_key)
+    }
+
     fn handle_actions(&mut self, actions: Vec<TimestampAction>) -> Result<()> {
         for action in actions {
             match action {
                 TimestampAction::Compact(start_ts, end_ts) => self.compact(start_ts, end_ts)?,
-                TimestampAction::Outdate(_) => todo!(),
+                TimestampAction::Outdate(_) => self.outdate()?,
             }
         }
 
@@ -97,8 +131,9 @@ impl Levels {
     ///
     /// todo: how to handle rick file is not fully covered by given time range?.
     fn compact(&mut self, start_ts: Timestamp, end_ts: Timestamp) -> Result<()> {
-        let mut table_builder = TableBuilder::from(self.file_manager.create(FileType::SSTable)?.0);
-        let (vlog_builder, vlog_filename) = self.file_manager.create(FileType::VLog)?;
+        let mut table_builder =
+            TableBuilder::from(self.ctx.file_manager.create(FileType::SSTable)?.0);
+        let (vlog_builder, vlog_filename) = self.ctx.file_manager.create(FileType::VLog)?;
         let mut vlog_builder = ValueLogBuilder::try_from(vlog_builder)?;
         let mut value_positions = vec![];
 
@@ -119,8 +154,8 @@ impl Levels {
         // call compress_fn to compact points.
         let mut keys = Vec::with_capacity(entry_map.len());
         for (key, ts_value) in entry_map {
-            let compress_fn_name = self.fn_registry.dispatch_fn()(&key);
-            let compress_fn = self.fn_registry.udcf(compress_fn_name)?.compress();
+            let compress_fn_name = self.ctx.fn_registry.dispatch_fn()(&key);
+            let compress_fn = self.ctx.fn_registry.udcf(compress_fn_name)?.compress();
             let compressed_data = compress_fn(key.clone(), ts_value);
 
             let (offset, size) = vlog_builder.add_entry(compressed_data)?;
@@ -133,6 +168,12 @@ impl Levels {
         table_builder.finish(vlog_filename)?;
 
         Ok(())
+    }
+
+    fn outdate(&mut self) -> Result<()> {
+        self.level_info.remove_last_level()?;
+
+        todo!()
     }
 }
 
@@ -205,16 +246,22 @@ impl TimestampReviewer for SimpleTimestampReviewer {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::file::FileManager;
+    use crate::fn_registry::FnRegistry;
 
     use tempfile::tempdir;
 
     #[test]
     fn level_put_and_get() {
         let base_dir = tempdir().unwrap();
-        let file_manager = Arc::new(FileManager::with_base_dir(base_dir.path()).unwrap());
+        let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
         let fn_registry = FnRegistry::new_noop();
+        let ctx = Arc::new(Context {
+            file_manager,
+            fn_registry,
+        });
         let timestamp_reviewer = Arc::new(Mutex::new(SimpleTimestampReviewer::new(10, 30)));
-        let mut levels = Levels::try_new(timestamp_reviewer, fn_registry, file_manager).unwrap();
+        let mut levels = Levels::try_new(1, timestamp_reviewer, ctx).unwrap();
 
         let entries = vec![
             (1, b"key1".to_vec(), b"value1".to_vec()).into(),

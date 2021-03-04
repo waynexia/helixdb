@@ -6,7 +6,6 @@
 
 mod context;
 mod db;
-mod entry;
 mod error;
 mod file;
 mod fn_registry;
@@ -15,5 +14,6 @@ mod io_worker;
 mod iterator;
 mod level;
 mod table;
+mod types;
 
 pub use db::*;

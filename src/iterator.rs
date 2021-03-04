@@ -1,5 +1,5 @@
-use crate::entry::{Bytes, Timestamp};
 use crate::error::Result;
+use crate::types::{Bytes, Timestamp};
 
 // todo: make `value()` returns reference
 pub trait Iterator {

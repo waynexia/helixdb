@@ -2,8 +2,8 @@ use std::collections::{HashMap, VecDeque};
 use std::convert::TryInto;
 use std::sync::Arc;
 
-use crate::entry::{Bytes, Timestamp};
 use crate::error::{HelixError, Result};
+use crate::types::{Bytes, Timestamp};
 
 /// Custom compaction function. This will be called when compacting L0
 /// files to L1.

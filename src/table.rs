@@ -1,10 +1,11 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::context::Context;
-use crate::entry::{Bytes, Timestamp};
 use crate::error::Result;
 use crate::file::{TableMeta, VLog};
 use crate::iterator::Iterator;
+use crate::types::{Bytes, Entry, Timestamp};
 
 pub struct TableIterator<'a> {
     /// map of key to (value offset, value size)
@@ -14,7 +15,7 @@ pub struct TableIterator<'a> {
     vlog: VLog,
     ctx: &'a Context,
 
-    // states
+    // states part
     curr_key: Bytes,
     // curr_ts: Timestamp,
     curr_entries: Vec<(Timestamp, Bytes)>,
@@ -33,10 +34,9 @@ impl<'a> TableIterator<'a> {
         ctx: &'a Context,
     ) -> Result<Self> {
         let file_manager = &ctx.file_manager;
-        let vlog = VLog::from(file_manager.open(vlog_filename)?);
+        let vlog = VLog::from(file_manager.open_(vlog_filename)?);
         Ok(Self {
             curr_key: vec![],
-            // curr_ts: table_meta.start(),
             curr_entries: vec![],
             curr_key_cursor: 0,
             curr_entry_cursor: 0,
@@ -150,5 +150,64 @@ impl DecompressCache {
 
     fn insert(&mut self, key: Bytes, entries: Vec<(Timestamp, Bytes)>) {
         self.cache.insert(key, entries);
+    }
+}
+
+/// Provides read methods to SSTable.
+///
+/// If wants to modify a sstable should get a mutable handle (unimplemented).
+pub struct SSTableHandle {
+    ctx: Arc<Context>,
+    index: HashMap<Bytes, usize>,
+    raw_entry_positions: Vec<(Bytes, u64, u64)>,
+    vlog: VLog,
+    _table_meta: TableMeta,
+}
+
+impl SSTableHandle {
+    pub fn new(
+        ctx: Arc<Context>,
+        index: HashMap<Bytes, usize>,
+        raw_entry_positions: Vec<(Bytes, u64, u64)>,
+        vlog: VLog,
+        _table_meta: TableMeta,
+    ) -> Self {
+        Self {
+            ctx,
+            index,
+            raw_entry_positions,
+            vlog,
+            _table_meta,
+        }
+    }
+
+    pub fn get(&self, time_key: &(Timestamp, Bytes)) -> Result<Option<Entry>> {
+        let (ts, key) = time_key;
+        // todo: simplify this
+        let index = match self.index.get(key) {
+            Some(thing) => thing,
+            None => return Ok(None),
+        };
+        let (_, offset, size) = match self.raw_entry_positions.get(*index) {
+            Some(thing) => thing,
+            None => return Ok(None),
+        };
+        let raw_bytes = self.vlog.get(*offset, *size)?;
+
+        let decompress_fn_name = self.ctx.fn_registry.dispatch_fn()(key);
+        let decompress_fn = self.ctx.fn_registry.udcf(decompress_fn_name)?;
+        let entries = decompress_fn.decompress()(key.clone(), raw_bytes);
+
+        let index = match entries.binary_search_by_key(&ts, |(ts, _)| ts).ok() {
+            Some(thing) => thing,
+            None => return Ok(None),
+        };
+        let (timestamp, value) = &entries[index];
+
+        Ok(Some(Entry {
+            timestamp: *timestamp,
+            key: key.clone(),
+            value: value.clone(),
+        }))
     }
 }

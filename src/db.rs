@@ -1,4 +1,4 @@
-use crate::entry::{Bytes, Entry};
+use crate::types::{Bytes, Entry};
 
 pub struct HelixDB;
 

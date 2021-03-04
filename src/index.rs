@@ -1,5 +1,5 @@
-use crate::entry::{Bytes, Entry, Timestamp};
 use crate::error::Result;
+use crate::types::{Bytes, Entry, Timestamp};
 
 use std::collections::{btree_map, BTreeMap};
 

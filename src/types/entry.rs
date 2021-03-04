@@ -1,10 +1,12 @@
-use flatbuffers::FlatBufferBuilder;
+use flatbuffers::{FlatBufferBuilder, Follow};
 use std::{convert::TryInto, mem};
 
 use protos::{Entry as FB_Entry, EntryArgs, Timestamp as FB_Timestamp};
 
 pub type Bytes = Vec<u8>;
 pub type Timestamp = i64;
+pub type ThreadId = u64;
+pub type LevelId = i64;
 
 /// Wrapper struct over protos::Entry.
 ///
@@ -22,6 +24,12 @@ impl Entry {
         let mut fbb = FlatBufferBuilder::new();
 
         let timestamp = FB_Timestamp::new(self.timestamp);
+        // let timestamp = protos::Timestamp::create(
+        //     &mut fbb,
+        //     &protos::TimestampArgs {
+        //         timestamp: self.timestamp,
+        //     },
+        // );
         let key_bytes = fbb.create_vector_direct(&self.key);
         let value_bytes = fbb.create_vector_direct(&self.value);
 
@@ -39,12 +47,12 @@ impl Entry {
     }
 
     pub fn decode(bytes: &Bytes) -> Self {
-        let fb_entry = protos::get_root_as_entry(&bytes);
+        let fb_entry = flatbuffers::get_root::<protos::Entry<'_>>(bytes);
 
         Self {
-            timestamp: fb_entry.timestamp().timestamp(),
-            key: fb_entry.key().to_vec(),
-            value: fb_entry.value().to_vec(),
+            timestamp: fb_entry.timestamp().unwrap().timestamp(),
+            key: fb_entry.key().unwrap().to_vec(),
+            value: fb_entry.value().unwrap().to_vec(),
         }
     }
 
@@ -74,7 +82,7 @@ impl From<(Timestamp, Bytes, Bytes)> for Entry {
 }
 
 /// Describe a encoded [Entry]'s buffer.
-pub(crate) struct EntryMeta {
+pub struct EntryMeta {
     pub length: u64,
 }
 
@@ -95,5 +103,24 @@ impl EntryMeta {
         Self {
             length: u64::from_le_bytes(bytes.try_into().unwrap()),
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+
+    use super::*;
+
+    #[test]
+    fn entry_codec() {
+        let entry = Entry {
+            timestamp: 1000,
+            key: b"key".to_vec(),
+            value: b"value".to_vec(),
+        };
+
+        let bytes = entry.encode();
+
+        assert_eq!(entry, Entry::decode(&bytes));
     }
 }
