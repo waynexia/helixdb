@@ -1,14 +1,18 @@
-use std::fs::{self, remove_file, File};
 use std::io::Read;
 use std::io::{Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    fs::{self, remove_file, File},
+    io::Write,
+};
 
 use crate::error::Result;
 use crate::types::{Bytes, LevelId, LevelInfo, ThreadId};
 
 const COMMON_FILE_PREFIX: &str = "helix";
 const COMMON_FILE_EXTENSION: &str = "hlx";
+const BINARY_FILE_EXTENSION: &str = "bin";
 
 const LEVEL_INFO_FILENAME: &str = "LEVEL_INFO";
 
@@ -81,6 +85,7 @@ impl FileManager {
         Ok((file, filename))
     }
 
+    // might deprecate this.
     /// Create files in `Others` type. Like `LEVEL_INFO`.
     fn create_others(&self, filename: String) -> Result<(File, String)> {
         let filename = self.base_dir.join(filename);
@@ -121,7 +126,17 @@ impl FileManager {
     }
 
     pub fn open_sstable(&self, tid: ThreadId, level_id: LevelId) -> Result<File> {
-        todo!()
+        let filename = self.base_dir.join(format!(
+            "{}-{}-{}.{}",
+            "sst", tid, level_id, BINARY_FILE_EXTENSION,
+        ));
+
+        Ok(File::with_options()
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .create(true)
+            .open(filename)?)
     }
 
     /// Open or create [LevelInfo].
@@ -143,9 +158,20 @@ impl FileManager {
         Ok(level_info)
     }
 
+    // todo: correct this.
     /// Refresh (overwrite) level info file.
-    fn sync_level_info(&self, bytes: &Bytes) -> Result<()> {
-        todo!()
+    pub fn sync_level_info(&self, bytes: &Bytes) -> Result<()> {
+        let filename = self.base_dir.join(LEVEL_INFO_FILENAME);
+        let mut file = File::with_options()
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .create(true)
+            .open(filename)?;
+
+        file.write_all(bytes)?;
+
+        Ok(())
     }
 }
 
@@ -156,7 +182,7 @@ mod test {
     use tempfile::tempdir;
 
     #[test]
-    fn init_file_manager() {
+    fn new_file_manager() {
         let base_dir = tempdir().unwrap();
 
         let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();

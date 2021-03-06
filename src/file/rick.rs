@@ -5,7 +5,6 @@ use std::{collections::BTreeMap, usize};
 use crate::error::Result;
 use crate::index::MemIndex;
 use crate::types::{Bytes, Entry, EntryMeta, Timestamp};
-// use protos::Entry;
 
 /// Handles to entries in rick (level 0).
 pub struct Rick {
@@ -80,10 +79,11 @@ impl Rick {
 
     pub fn entry_list(&mut self) -> Result<Vec<Entry>> {
         self.file.seek(SeekFrom::Start(0))?;
+        const META_SIZE: usize = EntryMeta::meta_size();
         let mut entries = vec![];
-        let mut prefix_buf = [0; EntryMeta::meta_size()];
+        let mut prefix_buf = [0; META_SIZE];
 
-        while self.file.read(&mut prefix_buf).is_ok() {
+        while let Ok(META_SIZE) = self.file.read(&mut prefix_buf) {
             let meta = EntryMeta::decode(&prefix_buf);
             let offload_length = meta.length as usize;
             let mut offload_buf = vec![0; offload_length];
@@ -126,6 +126,13 @@ impl Rick {
 
     pub fn sync(&self) -> Result<()> {
         self.file.sync_all()?;
+
+        Ok(())
+    }
+
+    /// Drop all entries.
+    pub fn clean(&mut self) -> Result<()> {
+        self.file.set_len(0)?;
 
         Ok(())
     }

@@ -1,12 +1,9 @@
 use flatbuffers::{FlatBufferBuilder, Follow};
 use std::{convert::TryInto, mem};
 
-use protos::{Entry as FB_Entry, EntryArgs, Timestamp as FB_Timestamp};
-
 pub type Bytes = Vec<u8>;
 pub type Timestamp = i64;
 pub type ThreadId = u64;
-pub type LevelId = i64;
 
 /// Wrapper struct over protos::Entry.
 ///
@@ -23,19 +20,13 @@ impl Entry {
     pub fn encode(&self) -> Bytes {
         let mut fbb = FlatBufferBuilder::new();
 
-        let timestamp = FB_Timestamp::new(self.timestamp);
-        // let timestamp = protos::Timestamp::create(
-        //     &mut fbb,
-        //     &protos::TimestampArgs {
-        //         timestamp: self.timestamp,
-        //     },
-        // );
+        let timestamp = protos::Timestamp::new(self.timestamp);
         let key_bytes = fbb.create_vector_direct(&self.key);
         let value_bytes = fbb.create_vector_direct(&self.value);
 
-        let entry = FB_Entry::create(
+        let entry = protos::Entry::create(
             &mut fbb,
-            &EntryArgs {
+            &protos::EntryArgs {
                 timestamp: Some(&timestamp),
                 key: Some(key_bytes),
                 value: Some(value_bytes),

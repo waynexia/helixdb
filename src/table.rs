@@ -10,6 +10,7 @@ use crate::types::{Bytes, Entry, Timestamp};
 pub struct TableIterator<'a> {
     /// map of key to (value offset, value size)
     index: HashMap<Bytes, usize>,
+    // todo: remove first element in tuple.
     raw_entry_positions: Vec<(Bytes, u64, u64)>,
     _table_meta: TableMeta,
     vlog: VLog,
@@ -184,15 +185,11 @@ impl SSTableHandle {
     pub fn get(&self, time_key: &(Timestamp, Bytes)) -> Result<Option<Entry>> {
         let (ts, key) = time_key;
         // todo: simplify this
-        let index = match self.index.get(key) {
+        let (offset, size) = match self.get_raw(key) {
             Some(thing) => thing,
             None => return Ok(None),
         };
-        let (_, offset, size) = match self.raw_entry_positions.get(*index) {
-            Some(thing) => thing,
-            None => return Ok(None),
-        };
-        let raw_bytes = self.vlog.get(*offset, *size)?;
+        let raw_bytes = self.vlog.get(offset, size)?;
 
         let decompress_fn_name = self.ctx.fn_registry.dispatch_fn()(key);
         let decompress_fn = self.ctx.fn_registry.udcf(decompress_fn_name)?;
@@ -209,5 +206,14 @@ impl SSTableHandle {
             key: key.clone(),
             value: value.clone(),
         }))
+    }
+
+    #[inline]
+    /// Get `(offset, entry size)` stored in sstable.
+    pub fn get_raw(&self, key: &Bytes) -> Option<(u64, u64)> {
+        let index = self.index.get(key)?;
+        let (_, offset, size) = self.raw_entry_positions.get(*index)?;
+
+        Some((*offset, *size))
     }
 }

@@ -16,6 +16,7 @@ impl VLog {
     pub fn get(&self, offset: u64, length: u64) -> Result<Bytes> {
         let mut file = self.file.lock().unwrap();
         let mut buf = Vec::with_capacity(length as usize);
+        buf.resize_with(length as usize, Default::default);
         file.seek(SeekFrom::Start(offset))?;
         file.read_exact(&mut buf)?;
         Ok(buf)

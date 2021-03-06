@@ -60,13 +60,14 @@ pub struct FnRegistry {
 }
 
 impl FnRegistry {
+    #[cfg(test)]
     pub fn new_noop() -> Self {
-        unsafe {
-            Self {
-                sharding_key_fn: noop_sharding_key_fn(),
-                dispatch_fn: noop_dispatch_fn(),
-                compress_functions: HashMap::new(),
-            }
+        let mut compress_functions = HashMap::new();
+        compress_functions.insert("noop".to_string(), noop_udcf());
+        Self {
+            sharding_key_fn: noop_sharding_key_fn(),
+            dispatch_fn: noop_dispatch_fn(),
+            compress_functions,
         }
     }
 

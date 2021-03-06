@@ -1,10 +1,16 @@
-use flatbuffers::{FlatBufferBuilder, Follow};
+use flatbuffers::FlatBufferBuilder;
 use std::collections::VecDeque;
 use std::sync::RwLock;
 
-use super::{Bytes, LevelId, Timestamp};
+use super::{Bytes, Timestamp};
 use crate::error::Result;
+use crate::file::FileManager;
 
+/// Mono-increase identifier to level files. Starts from 1.
+/// Level id `0` stands for Rick level.
+pub type LevelId = i64;
+
+#[derive(Default, PartialEq)]
 pub struct LevelDesc {
     start: Timestamp,
     end: Timestamp,
@@ -30,14 +36,12 @@ impl LevelDesc {
 
         let id = protos::LevelId::new(self.id);
 
-        let desc = protos::LevelDesc::new(&time_range, &id);
-
-        desc
+        protos::LevelDesc::new(&time_range, &id)
     }
 
     #[inline]
     pub fn is_timestamp_match(&self, timestamp: Timestamp) -> bool {
-        self.start <= timestamp && timestamp >= self.end
+        self.start <= timestamp && timestamp <= self.end
     }
 }
 
@@ -57,7 +61,10 @@ impl LevelInfo {
         }
         let batch = fbb.end_vector::<protos::LevelDesc>(infos.len());
 
-        fbb.finish(batch, None);
+        let infos =
+            protos::LevelInfo::create(&mut fbb, &protos::LevelInfoArgs { infos: Some(batch) });
+
+        fbb.finish(infos, None);
         fbb.finished_data().to_vec()
     }
 
@@ -83,30 +90,17 @@ impl LevelInfo {
         }
     }
 
-    // todo: use one lock to accomplish following two methods.
-    /// find level index.
-    pub fn find_level(&self, timestamp: Timestamp) -> Option<usize> {
-        let infos = self.infos.read().unwrap();
-
-        // timestamp covered by rick will not present in level-info
-        if infos.is_empty() || timestamp < infos[0].start {
-            return Some(0);
-        }
-
-        for (pos, desc) in infos.iter().enumerate() {
-            if desc.is_timestamp_match(timestamp) {
-                return Some(pos);
-            }
-        }
-
-        None
-    }
-
+    /// Give a timestamp and find the level suits it.
+    ///
+    /// Rick entries' timestamp will not present in level-info.
+    /// Thus if given timestamp is larger than the biggest timestamp recorded by
+    /// this level-info, `Some(0)` will be returned. `0` is a special [LevelId]
+    /// stands for Rick level.
     pub fn get_level_id(&self, timestamp: Timestamp) -> Option<LevelId> {
         let infos = self.infos.read().unwrap();
 
         // timestamp covered by rick will not present in level-info
-        if infos.is_empty() || timestamp < infos[0].start {
+        if infos.is_empty() || timestamp > infos[0].end {
             return Some(0);
         }
 
@@ -119,11 +113,69 @@ impl LevelInfo {
         None
     }
 
-    pub fn add_level(&mut self, start: Timestamp, end: Timestamp) -> Result<()> {
-        todo!()
+    /// Return new level id.
+    pub fn add_level(
+        &mut self,
+        start: Timestamp,
+        end: Timestamp,
+        file_manager: &FileManager,
+    ) -> Result<LevelId> {
+        let mut new_desc = LevelDesc { start, end, id: 0 };
+
+        let mut infos = self.infos.write().unwrap();
+        let next_id = infos.front().map_or_else(|| 1, |desc| desc.id + 1);
+        new_desc.id = next_id;
+
+        infos.push_front(new_desc);
+        drop(infos);
+
+        self.sync(file_manager)?;
+
+        Ok(next_id)
     }
 
-    pub fn remove_last_level(&mut self) -> Result<()> {
-        todo!()
+    pub fn remove_last_level(&mut self, file_manager: &FileManager) -> Result<()> {
+        self.infos.write().unwrap().pop_back();
+
+        self.sync(file_manager)
+    }
+
+    /// Sync file infos to disk. Requires read lock.
+    fn sync(&self, file_manager: &FileManager) -> Result<()> {
+        let bytes = self.encode();
+        file_manager.sync_level_info(&bytes)?;
+
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn new(descriptions: Vec<LevelDesc>) -> Self {
+        let infos = VecDeque::from(descriptions);
+
+        Self {
+            infos: RwLock::new(infos),
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn level_desc_codec() {
+        let desc = LevelDesc {
+            start: 21,
+            end: 40,
+            id: 4,
+        };
+        let info = LevelInfo::new(vec![desc]);
+
+        let bytes = info.encode();
+        let info = LevelInfo::decode(&bytes);
+
+        assert_eq!(info.get_level_id(0), None);
+        assert_eq!(info.get_level_id(21), Some(4));
+        assert_eq!(info.get_level_id(41), Some(0));
     }
 }

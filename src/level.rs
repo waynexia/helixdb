@@ -3,11 +3,10 @@ use std::convert::TryFrom;
 use std::sync::{Arc, Mutex};
 
 use crate::context::Context;
-use crate::error::{HelixError, Result};
+use crate::error::Result;
 use crate::file::{FileType, Rick, SSTable, TableBuilder, ValueLogBuilder};
 use crate::index::MemIndex;
-use crate::table::SSTableHandle;
-use crate::types::{Bytes, Entry, LevelInfo, ThreadId, Timestamp};
+use crate::types::{Bytes, Entry, LevelId, LevelInfo, ThreadId, Timestamp};
 
 pub struct LevelConfig {
     /// Use one file to store non-Rick (SSTable) entries or not.
@@ -79,7 +78,7 @@ impl Levels {
     }
 
     pub fn get(&mut self, time_key: &(Timestamp, Bytes)) -> Result<Option<Entry>> {
-        let level = self.level_info.find_level(time_key.0);
+        let level = self.level_info.get_level_id(time_key.0);
         match level {
             None => Ok(None),
             Some(0) => self.get_from_rick(time_key),
@@ -102,13 +101,8 @@ impl Levels {
     fn get_from_table(
         &mut self,
         time_key: &(Timestamp, Bytes),
-        level: usize,
+        level_id: LevelId,
     ) -> Result<Option<Entry>> {
-        let level_id = match self.level_info.get_level_id(time_key.0) {
-            Some(thing) => thing,
-            None => return Ok(None),
-        };
-
         // todo: cache handle.
         let table_file = self.ctx.file_manager.open_sstable(self.tid, level_id)?;
         let handle = SSTable::from(table_file).handle(self.ctx.clone())?;
@@ -119,7 +113,12 @@ impl Levels {
     fn handle_actions(&mut self, actions: Vec<TimestampAction>) -> Result<()> {
         for action in actions {
             match action {
-                TimestampAction::Compact(start_ts, end_ts) => self.compact(start_ts, end_ts)?,
+                TimestampAction::Compact(start_ts, end_ts) => {
+                    let next_level_id =
+                        self.level_info
+                            .add_level(start_ts, end_ts, &self.ctx.file_manager)?;
+                    self.compact(start_ts, end_ts, next_level_id)?;
+                }
                 TimestampAction::Outdate(_) => self.outdate()?,
             }
         }
@@ -130,9 +129,9 @@ impl Levels {
     /// Compact entries from rick in [start_ts, end_ts] to next level.
     ///
     /// todo: how to handle rick file is not fully covered by given time range?.
-    fn compact(&mut self, start_ts: Timestamp, end_ts: Timestamp) -> Result<()> {
+    fn compact(&mut self, start_ts: Timestamp, end_ts: Timestamp, level_id: LevelId) -> Result<()> {
         let mut table_builder =
-            TableBuilder::from(self.ctx.file_manager.create(FileType::SSTable)?.0);
+            TableBuilder::from(self.ctx.file_manager.open_sstable(self.tid, level_id)?);
         let (vlog_builder, vlog_filename) = self.ctx.file_manager.create(FileType::VLog)?;
         let mut vlog_builder = ValueLogBuilder::try_from(vlog_builder)?;
         let mut value_positions = vec![];
@@ -167,11 +166,13 @@ impl Levels {
         table_builder.add_entries(keys, value_positions);
         table_builder.finish(vlog_filename)?;
 
+        self.rick.clean()?;
+
         Ok(())
     }
 
     fn outdate(&mut self) -> Result<()> {
-        self.level_info.remove_last_level()?;
+        self.level_info.remove_last_level(&self.ctx.file_manager)?;
 
         todo!()
     }
@@ -252,7 +253,28 @@ mod test {
     use tempfile::tempdir;
 
     #[test]
-    fn level_put_and_get() {
+    fn simple_timestamp_reviewer_trigger_compact_and_outdate() {
+        let mut tsr = SimpleTimestampReviewer::new(10, 30);
+
+        let mut actions = vec![];
+        let expected = vec![
+            TimestampAction::Compact(0, 9),
+            TimestampAction::Compact(10, 19),
+            TimestampAction::Compact(20, 29),
+            TimestampAction::Outdate(9),
+            TimestampAction::Compact(30, 39),
+            TimestampAction::Outdate(19),
+        ];
+
+        for i in 0..40 {
+            actions.append(&mut tsr.observe(i));
+        }
+
+        assert_eq!(actions, expected);
+    }
+
+    #[test]
+    fn put_get_on_rick() {
         let base_dir = tempdir().unwrap();
         let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
         let fn_registry = FnRegistry::new_noop();
@@ -288,23 +310,25 @@ mod test {
     }
 
     #[test]
-    fn simple_timestamp_reviewer_trigger_compact_and_outdate() {
-        let mut tsr = SimpleTimestampReviewer::new(10, 30);
+    fn put_get_with_compaction() {
+        let base_dir = tempdir().unwrap();
+        let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
+        let fn_registry = FnRegistry::new_noop();
+        let ctx = Arc::new(Context {
+            file_manager,
+            fn_registry,
+        });
+        let timestamp_reviewer = Arc::new(Mutex::new(SimpleTimestampReviewer::new(10, 30)));
+        let mut levels = Levels::try_new(1, timestamp_reviewer, ctx).unwrap();
 
-        let mut actions = vec![];
-        let expected = vec![
-            TimestampAction::Compact(0, 9),
-            TimestampAction::Compact(10, 19),
-            TimestampAction::Compact(20, 29),
-            TimestampAction::Outdate(9),
-            TimestampAction::Compact(30, 39),
-            TimestampAction::Outdate(19),
-        ];
-
-        for i in 0..40 {
-            actions.append(&mut tsr.observe(i));
+        for timestamp in 0..25 {
+            levels
+                .put(vec![(timestamp, b"key".to_vec(), b"value".to_vec()).into()])
+                .unwrap();
         }
 
-        assert_eq!(actions, expected);
+        for timestamp in 0..25 {
+            levels.get(&(timestamp, b"key".to_vec())).unwrap().unwrap();
+        }
     }
 }
