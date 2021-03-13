@@ -55,3 +55,24 @@ impl TryFrom<File> for ValueLogBuilder {
         Ok(Self { file, file_size: 0 })
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    use tempfile::tempfile;
+
+    #[test]
+    fn vlog_builder() {
+        let vlog_file = tempfile().unwrap();
+        let mut vlog_builder = ValueLogBuilder::try_from(vlog_file.try_clone().unwrap()).unwrap();
+
+        let (offset1, size1) = vlog_builder.add_entry(b"some values".to_vec()).unwrap();
+        let (offset2, size2) = vlog_builder.add_entry(b"some others".to_vec()).unwrap();
+        drop(vlog_builder);
+
+        let vlog = VLog::from(vlog_file);
+        assert_eq!(vlog.get(offset1, size1).unwrap(), b"some values".to_vec());
+        assert_eq!(vlog.get(offset2, size2).unwrap(), b"some others".to_vec());
+    }
+}
