@@ -10,6 +10,7 @@ mod error;
 mod file;
 mod fn_registry;
 mod index;
+mod io;
 mod io_worker;
 mod iterator;
 mod level;
