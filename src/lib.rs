@@ -2,6 +2,7 @@
 
 #![feature(with_options)]
 #![feature(vec_into_raw_parts)]
+#![feature(trait_alias)]
 #![feature(new_uninit)]
 
 mod context;
