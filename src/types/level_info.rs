@@ -10,7 +10,7 @@ use crate::file::FileManager;
 /// Level id `0` stands for Rick level.
 pub type LevelId = i64;
 
-#[derive(Default, PartialEq)]
+#[derive(Default, PartialEq, Debug, Clone, Copy)]
 pub struct LevelDesc {
     start: Timestamp,
     end: Timestamp,
@@ -22,7 +22,7 @@ impl From<protos::LevelDesc> for LevelDesc {
         let time_range = fb_desc.time_range();
         Self {
             start: time_range.start().timestamp(),
-            end: time_range.start().timestamp(),
+            end: time_range.end().timestamp(),
             id: fb_desc.id().id(),
         }
     }
@@ -45,7 +45,8 @@ impl LevelDesc {
     }
 }
 
-// This should be placed in heap? And each thread keeps a copy to it.
+// This should be placed in heap? And each thread keeps a copy of it.
+#[derive(Debug)]
 pub struct LevelInfo {
     infos: RwLock<VecDeque<LevelDesc>>,
 }
@@ -60,6 +61,8 @@ impl LevelInfo {
             fbb.push(desc.to_generated_type());
         }
         let batch = fbb.end_vector::<protos::LevelDesc>(infos.len());
+
+        // println!("batch: {:?}",batch.va)
 
         let infos =
             protos::LevelInfo::create(&mut fbb, &protos::LevelInfoArgs { infos: Some(batch) });
@@ -160,7 +163,12 @@ impl LevelInfo {
 
 #[cfg(test)]
 mod test {
+
+    use std::convert::TryInto;
+
     use super::*;
+
+    use tempfile::tempdir;
 
     #[test]
     fn level_desc_codec() {
@@ -173,9 +181,42 @@ mod test {
 
         let bytes = info.encode();
         let info = LevelInfo::decode(&bytes);
+        let infos: Vec<_> = info.infos.read().unwrap().iter().copied().collect();
 
-        assert_eq!(info.get_level_id(0), None);
-        assert_eq!(info.get_level_id(21), Some(4));
-        assert_eq!(info.get_level_id(41), Some(0));
+        assert_eq!(vec![desc], infos);
+    }
+
+    #[test]
+    fn add_level() {
+        let base_dir = tempdir().unwrap();
+        let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
+
+        let mut info = LevelInfo::new(vec![]);
+        info.add_level(0, 9, &file_manager).unwrap();
+        info.add_level(10, 19, &file_manager).unwrap();
+        info.add_level(20, 29, &file_manager).unwrap();
+        drop(info);
+
+        let info = file_manager.open_level_info().unwrap();
+        let infos: Vec<_> = info.infos.read().unwrap().iter().copied().collect();
+        let expected = vec![
+            LevelDesc {
+                start: 0,
+                end: 9,
+                id: 1,
+            },
+            LevelDesc {
+                start: 10,
+                end: 19,
+                id: 2,
+            },
+            LevelDesc {
+                start: 20,
+                end: 29,
+                id: 3,
+            },
+        ];
+
+        assert_eq!(infos, expected);
     }
 }
