@@ -133,6 +133,7 @@ impl Rick {
     /// Drop all entries.
     pub fn clean(&mut self) -> Result<()> {
         self.file.set_len(0)?;
+        self.file.sync_all()?;
 
         Ok(())
     }

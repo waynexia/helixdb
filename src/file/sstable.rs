@@ -168,6 +168,8 @@ impl TableBuilder {
 
         // todo: other blocks
 
+        self.file.sync_all()?;
+
         Ok(())
     }
 }
@@ -219,7 +221,9 @@ mod test {
         let keys = vec![b"key1".to_vec(), b"key2key2".to_vec(), b"key333".to_vec()];
         let offsets = vec![(1, 1), (2, 2), (3, 3)];
         table_builder.add_entries(keys.clone(), offsets.clone());
-        table_builder.finish("foo".to_string()).unwrap();
+        table_builder
+            .finish(base_dir.path().join("foo").to_str().unwrap().to_owned())
+            .unwrap();
 
         let table_handle = SSTable::from(ctx.file_manager.open_sstable(1, 1).unwrap())
             .handle(ctx)

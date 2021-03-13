@@ -132,7 +132,7 @@ impl Levels {
     fn compact(&mut self, start_ts: Timestamp, end_ts: Timestamp, level_id: LevelId) -> Result<()> {
         let mut table_builder =
             TableBuilder::from(self.ctx.file_manager.open_sstable(self.tid, level_id)?);
-        let (vlog_builder, vlog_filename) = self.ctx.file_manager.create(FileType::VLog)?;
+        let (vlog_builder, vlog_filename) = self.ctx.file_manager.open_vlog(self.tid, level_id)?;
         let mut vlog_builder = ValueLogBuilder::try_from(vlog_builder)?;
         let mut value_positions = vec![];
 
@@ -319,7 +319,7 @@ mod test {
             fn_registry,
         });
         let timestamp_reviewer = Arc::new(Mutex::new(SimpleTimestampReviewer::new(10, 30)));
-        let mut levels = Levels::try_new(1, timestamp_reviewer, ctx).unwrap();
+        let mut levels = Levels::try_new(1, timestamp_reviewer, ctx.clone()).unwrap();
 
         for timestamp in 0..25 {
             levels

@@ -1,13 +1,13 @@
+use std::fs::{self, remove_file, File};
+// use std::fs;
 use std::io::Read;
+use std::io::Write;
 use std::io::{Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
-use std::{
-    fs::{self, remove_file, File},
-    io::Write,
-};
 
 use crate::error::Result;
+// use crate::io::File;
 use crate::types::{Bytes, LevelId, LevelInfo, ThreadId};
 
 const COMMON_FILE_PREFIX: &str = "helix";
@@ -58,6 +58,7 @@ impl FileManager {
 
     /// filename is consist of general prefix, file type and creating timestamp.
     /// For example, `helix-manifest-160000000.hlx`
+    #[deprecated]
     pub fn create(&self, ty: FileType) -> Result<(File, String)> {
         if let FileType::Others(filename) = ty {
             return self.create_others(filename);
@@ -139,6 +140,24 @@ impl FileManager {
             .open(filename)?)
     }
 
+    // todo: remove vlog_name in return value
+    pub fn open_vlog(&self, tid: ThreadId, level_id: LevelId) -> Result<(File, String)> {
+        let filename = self.base_dir.join(format!(
+            "{}-{}-{}.{}",
+            "vlog", tid, level_id, BINARY_FILE_EXTENSION,
+        ));
+
+        Ok((
+            File::with_options()
+                .read(true)
+                .write(true)
+                .truncate(false)
+                .create(true)
+                .open(filename.clone())?,
+            filename.into_os_string().into_string().unwrap(),
+        ))
+    }
+
     /// Open or create [LevelInfo].
     pub fn open_level_info(&self) -> Result<LevelInfo> {
         let filename = self.base_dir.join(LEVEL_INFO_FILENAME);
@@ -170,6 +189,7 @@ impl FileManager {
             .open(filename)?;
 
         file.write_all(bytes)?;
+        file.sync_all()?;
 
         Ok(())
     }
