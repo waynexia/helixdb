@@ -59,9 +59,9 @@ impl FileManager {
     /// filename is consist of general prefix, file type and creating timestamp.
     /// For example, `helix-manifest-160000000.hlx`
     #[deprecated]
-    pub fn create(&self, ty: FileType) -> Result<(File, String)> {
+    pub async fn create(&self, ty: FileType) -> Result<(File, String)> {
         if let FileType::Others(filename) = ty {
-            return self.create_others(filename);
+            return self.create_others(filename).await;
         }
 
         let filename = self.base_dir.join(format!(
@@ -88,7 +88,7 @@ impl FileManager {
 
     // might deprecate this.
     /// Create files in `Others` type. Like `LEVEL_INFO`.
-    fn create_others(&self, filename: String) -> Result<(File, String)> {
+    async fn create_others(&self, filename: String) -> Result<(File, String)> {
         let filename = self.base_dir.join(filename);
         let file = File::with_options()
             .read(true)
@@ -101,13 +101,13 @@ impl FileManager {
         Ok((file, filename))
     }
 
-    pub fn remove<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+    pub async fn remove<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         remove_file(path)?;
 
         Ok(())
     }
 
-    pub fn open_<P: AsRef<Path>>(&self, filename: P) -> Result<File> {
+    pub async fn open_<P: AsRef<Path>>(&self, filename: P) -> Result<File> {
         Ok(File::with_options()
             .read(true)
             .write(true)
@@ -117,7 +117,7 @@ impl FileManager {
     }
 
     /// open or create required file.
-    pub fn open(&self, tid: ThreadId, ty: FileType) -> Result<File> {
+    pub async fn open(&self, tid: ThreadId, ty: FileType) -> Result<File> {
         todo!()
     }
 
@@ -126,7 +126,7 @@ impl FileManager {
         todo!()
     }
 
-    pub fn open_sstable(&self, tid: ThreadId, level_id: LevelId) -> Result<File> {
+    pub async fn open_sstable(&self, tid: ThreadId, level_id: LevelId) -> Result<File> {
         let filename = self.base_dir.join(format!(
             "{}-{}-{}.{}",
             "sst", tid, level_id, BINARY_FILE_EXTENSION,
@@ -141,7 +141,7 @@ impl FileManager {
     }
 
     // todo: remove vlog_name in return value
-    pub fn open_vlog(&self, tid: ThreadId, level_id: LevelId) -> Result<(File, String)> {
+    pub async fn open_vlog(&self, tid: ThreadId, level_id: LevelId) -> Result<(File, String)> {
         let filename = self.base_dir.join(format!(
             "{}-{}-{}.{}",
             "vlog", tid, level_id, BINARY_FILE_EXTENSION,
@@ -159,7 +159,7 @@ impl FileManager {
     }
 
     /// Open or create [LevelInfo].
-    pub fn open_level_info(&self) -> Result<LevelInfo> {
+    pub async fn open_level_info(&self) -> Result<LevelInfo> {
         let filename = self.base_dir.join(LEVEL_INFO_FILENAME);
         let mut file = File::with_options()
             .read(true)
@@ -179,7 +179,7 @@ impl FileManager {
 
     // todo: correct this.
     /// Refresh (overwrite) level info file.
-    pub fn sync_level_info(&self, bytes: &Bytes) -> Result<()> {
+    pub async fn sync_level_info(&self, bytes: &Bytes) -> Result<()> {
         let filename = self.base_dir.join(LEVEL_INFO_FILENAME);
         let mut file = File::with_options()
             .read(true)
@@ -201,12 +201,12 @@ mod test {
 
     use tempfile::tempdir;
 
-    #[test]
-    fn new_file_manager() {
+    #[tokio::test]
+    async fn new_file_manager() {
         let base_dir = tempdir().unwrap();
 
         let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
-        let _ = file_manager.create(FileType::Manifest).unwrap();
+        let _ = file_manager.create(FileType::Manifest).await.unwrap();
         assert_eq!(base_dir.path().read_dir().unwrap().count(), 1);
     }
 }

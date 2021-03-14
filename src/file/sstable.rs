@@ -25,10 +25,10 @@ impl SSTable {
     }
 
     /// Get read handle of SSTable.
-    pub fn handle(&mut self, ctx: Arc<Context>) -> Result<SSTableHandle> {
+    pub async fn handle(&mut self, ctx: Arc<Context>) -> Result<SSTableHandle> {
         let (index, raw_entry_positions, _) = self.read_table()?;
         let vlog_filename = self.read_vlog_filename()?.0;
-        let vlog = VLog::from(ctx.file_manager.open_(vlog_filename)?);
+        let vlog = VLog::from(ctx.file_manager.open_(vlog_filename).await?);
 
         Ok(SSTableHandle::new(
             ctx,
@@ -44,7 +44,8 @@ impl SSTable {
     /// Todo: use trait in std::iter.
     ///
     /// Todo: avoid read all data?
-    pub fn iterator<'ctx>(&mut self, ctx: &'ctx Context) -> Result<TableIterator<'ctx>> {
+    // todo: fix clippy needless_lifetimes?
+    pub async fn iterator<'ctx>(&mut self, ctx: &'ctx Context) -> Result<TableIterator<'ctx>> {
         let (index, raw_entry_positions, vlog_filename) = self.read_table()?;
 
         TableIterator::try_new(
@@ -54,6 +55,7 @@ impl SSTable {
             vlog_filename,
             ctx,
         )
+        .await
     }
 
     fn read_vlog_filename(&mut self) -> Result<(String, u64)> {
@@ -208,15 +210,16 @@ mod test {
     use crate::file::FileManager;
     use crate::fn_registry::FnRegistry;
 
-    #[test]
-    fn simple_table_builder() {
+    #[tokio::test]
+    async fn simple_table_builder() {
         let base_dir = tempdir().unwrap();
         let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
         let ctx = Arc::new(Context {
             file_manager,
             fn_registry: FnRegistry::new_noop(),
         });
-        let mut table_builder = TableBuilder::from(ctx.file_manager.open_sstable(1, 1).unwrap());
+        let mut table_builder =
+            TableBuilder::from(ctx.file_manager.open_sstable(1, 1).await.unwrap());
 
         let keys = vec![b"key1".to_vec(), b"key2key2".to_vec(), b"key333".to_vec()];
         let offsets = vec![(1, 1), (2, 2), (3, 3)];
@@ -225,8 +228,9 @@ mod test {
             .finish(base_dir.path().join("foo").to_str().unwrap().to_owned())
             .unwrap();
 
-        let table_handle = SSTable::from(ctx.file_manager.open_sstable(1, 1).unwrap())
+        let table_handle = SSTable::from(ctx.file_manager.open_sstable(1, 1).await.unwrap())
             .handle(ctx)
+            .await
             .unwrap();
 
         for (key, offset) in keys.into_iter().zip(offsets.into_iter()) {

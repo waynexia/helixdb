@@ -1,9 +1,12 @@
+use async_trait::async_trait;
+
 use crate::error::Result;
 use crate::types::{Bytes, Timestamp};
 
 // todo: make `value()` returns reference
+#[async_trait]
 pub trait Iterator {
-    fn seek(&mut self, timestamp: Timestamp, key: Bytes) -> Result<()>;
+    async fn seek(&mut self, timestamp: Timestamp, key: Bytes) -> Result<()>;
 
     fn next(&mut self) -> Result<()>;
 

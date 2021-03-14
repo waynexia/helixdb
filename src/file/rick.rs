@@ -15,7 +15,7 @@ impl Rick {
     /// Returns vector of (timestamp, key, entry's offset) to update index.
     ///
     /// `sync()` will be called before returning.
-    pub fn write(&mut self, entries: Vec<Entry>) -> Result<Vec<(Timestamp, Bytes, u64)>> {
+    pub async fn write(&mut self, entries: Vec<Entry>) -> Result<Vec<(Timestamp, Bytes, u64)>> {
         let mut positions = Vec::with_capacity(entries.len());
         let mut file_length = self.file.seek(SeekFrom::End(0))?;
 
@@ -39,7 +39,7 @@ impl Rick {
     /// Entry not found will be return as a error.
     ///
     /// Maybe verify key here?
-    pub fn read(&mut self, offset: u64) -> Result<Entry> {
+    pub async fn read(&mut self, offset: u64) -> Result<Entry> {
         self.file.seek(SeekFrom::Start(offset))?;
 
         let mut meta_buf = [0; EntryMeta::meta_size()];
@@ -152,11 +152,11 @@ mod test {
 
     use tempfile::tempdir;
 
-    #[test]
-    fn rick_read_write() {
+    #[tokio::test]
+    async fn rick_read_write() {
         let base_dir = tempdir().unwrap();
         let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
-        let (rick_file, _) = file_manager.create(FileType::Rick).unwrap();
+        let (rick_file, _) = file_manager.create(FileType::Rick).await.unwrap();
         let mut rick = Rick::from(rick_file);
 
         let entry = Entry {
@@ -164,9 +164,9 @@ mod test {
             key: b"key".to_vec(),
             value: b"value".to_vec(),
         };
-        rick.write(vec![entry.clone()]).unwrap();
+        rick.write(vec![entry.clone()]).await.unwrap();
 
-        let read_entry = rick.read(0).unwrap();
+        let read_entry = rick.read(0).await.unwrap();
         assert_eq!(entry, read_entry);
     }
 }

@@ -33,14 +33,14 @@ pub struct Levels {
 }
 
 impl Levels {
-    pub fn try_new(
+    pub async fn try_new(
         tid: ThreadId,
         timestamp_reviewer: Arc<Mutex<dyn TimestampReviewer>>,
         ctx: Arc<Context>,
     ) -> Result<Self> {
-        let (rick, _) = ctx.file_manager.create(FileType::Rick)?;
+        let (rick, _) = ctx.file_manager.create(FileType::Rick).await?;
         let rick = Rick::from(rick);
-        let level_info = ctx.file_manager.open_level_info()?;
+        let level_info = ctx.file_manager.open_level_info().await?;
 
         Ok(Self {
             tid,
@@ -52,7 +52,7 @@ impl Levels {
         })
     }
 
-    pub fn put(&mut self, entries: Vec<Entry>) -> Result<()> {
+    pub async fn put(&mut self, entries: Vec<Entry>) -> Result<()> {
         if entries.is_empty() {
             return Ok(());
         }
@@ -63,7 +63,7 @@ impl Levels {
             .unwrap()
             .timestamp;
 
-        let indices = self.rick.write(entries)?;
+        let indices = self.rick.write(entries).await?;
         self.memindex.insert_entries(indices)?;
 
         // review timestamp and handle actions.
@@ -72,24 +72,24 @@ impl Levels {
             .lock()
             .unwrap()
             .observe(max_timestamp);
-        self.handle_actions(review_actions)?;
+        self.handle_actions(review_actions).await?;
 
         Ok(())
     }
 
-    pub fn get(&mut self, time_key: &(Timestamp, Bytes)) -> Result<Option<Entry>> {
+    pub async fn get(&mut self, time_key: &(Timestamp, Bytes)) -> Result<Option<Entry>> {
         let level = self.level_info.get_level_id(time_key.0);
         match level {
             None => Ok(None),
-            Some(0) => self.get_from_rick(time_key),
-            Some(l) => self.get_from_table(time_key, l),
+            Some(0) => self.get_from_rick(time_key).await,
+            Some(l) => self.get_from_table(time_key, l).await,
         }
     }
 
     #[inline]
-    fn get_from_rick(&mut self, time_key: &(Timestamp, Bytes)) -> Result<Option<Entry>> {
+    async fn get_from_rick(&mut self, time_key: &(Timestamp, Bytes)) -> Result<Option<Entry>> {
         if let Some(offset) = self.memindex.get(time_key)? {
-            let entry = self.rick.read(offset)?;
+            let entry = self.rick.read(offset).await?;
 
             return Ok(Some(entry));
         }
@@ -98,28 +98,33 @@ impl Levels {
     }
 
     #[inline]
-    fn get_from_table(
+    async fn get_from_table(
         &mut self,
         time_key: &(Timestamp, Bytes),
         level_id: LevelId,
     ) -> Result<Option<Entry>> {
         // todo: cache handle.
-        let table_file = self.ctx.file_manager.open_sstable(self.tid, level_id)?;
-        let handle = SSTable::from(table_file).handle(self.ctx.clone())?;
+        let table_file = self
+            .ctx
+            .file_manager
+            .open_sstable(self.tid, level_id)
+            .await?;
+        let handle = SSTable::from(table_file).handle(self.ctx.clone()).await?;
 
-        handle.get(time_key)
+        handle.get(time_key).await
     }
 
-    fn handle_actions(&mut self, actions: Vec<TimestampAction>) -> Result<()> {
+    async fn handle_actions(&mut self, actions: Vec<TimestampAction>) -> Result<()> {
         for action in actions {
             match action {
                 TimestampAction::Compact(start_ts, end_ts) => {
-                    let next_level_id =
-                        self.level_info
-                            .add_level(start_ts, end_ts, &self.ctx.file_manager)?;
-                    self.compact(start_ts, end_ts, next_level_id)?;
+                    let next_level_id = self
+                        .level_info
+                        .add_level(start_ts, end_ts, &self.ctx.file_manager)
+                        .await?;
+                    self.compact(start_ts, end_ts, next_level_id).await?;
                 }
-                TimestampAction::Outdate(_) => self.outdate()?,
+                TimestampAction::Outdate(_) => self.outdate().await?,
             }
         }
 
@@ -129,10 +134,20 @@ impl Levels {
     /// Compact entries from rick in [start_ts, end_ts] to next level.
     ///
     /// todo: how to handle rick file is not fully covered by given time range?.
-    fn compact(&mut self, start_ts: Timestamp, end_ts: Timestamp, level_id: LevelId) -> Result<()> {
-        let mut table_builder =
-            TableBuilder::from(self.ctx.file_manager.open_sstable(self.tid, level_id)?);
-        let (vlog_builder, vlog_filename) = self.ctx.file_manager.open_vlog(self.tid, level_id)?;
+    async fn compact(
+        &mut self,
+        start_ts: Timestamp,
+        end_ts: Timestamp,
+        level_id: LevelId,
+    ) -> Result<()> {
+        let mut table_builder = TableBuilder::from(
+            self.ctx
+                .file_manager
+                .open_sstable(self.tid, level_id)
+                .await?,
+        );
+        let (vlog_builder, vlog_filename) =
+            self.ctx.file_manager.open_vlog(self.tid, level_id).await?;
         let mut vlog_builder = ValueLogBuilder::try_from(vlog_builder)?;
         let mut value_positions = vec![];
 
@@ -171,8 +186,10 @@ impl Levels {
         Ok(())
     }
 
-    fn outdate(&mut self) -> Result<()> {
-        self.level_info.remove_last_level(&self.ctx.file_manager)?;
+    async fn outdate(&mut self) -> Result<()> {
+        self.level_info
+            .remove_last_level(&self.ctx.file_manager)
+            .await?;
 
         todo!()
     }
@@ -252,8 +269,8 @@ mod test {
 
     use tempfile::tempdir;
 
-    #[test]
-    fn simple_timestamp_reviewer_trigger_compact_and_outdate() {
+    #[tokio::test]
+    async fn simple_timestamp_reviewer_trigger_compact_and_outdate() {
         let mut tsr = SimpleTimestampReviewer::new(10, 30);
 
         let mut actions = vec![];
@@ -273,8 +290,8 @@ mod test {
         assert_eq!(actions, expected);
     }
 
-    #[test]
-    fn put_get_on_rick() {
+    #[tokio::test]
+    async fn put_get_on_rick() {
         let base_dir = tempdir().unwrap();
         let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
         let fn_registry = FnRegistry::new_noop();
@@ -283,7 +300,7 @@ mod test {
             fn_registry,
         });
         let timestamp_reviewer = Arc::new(Mutex::new(SimpleTimestampReviewer::new(10, 30)));
-        let mut levels = Levels::try_new(1, timestamp_reviewer, ctx).unwrap();
+        let mut levels = Levels::try_new(1, timestamp_reviewer, ctx).await.unwrap();
 
         let entries = vec![
             (1, b"key1".to_vec(), b"value1".to_vec()).into(),
@@ -294,23 +311,23 @@ mod test {
             (3, b"key1".to_vec(), b"value1".to_vec()).into(),
         ];
 
-        levels.put(entries.clone()).unwrap();
+        levels.put(entries.clone()).await.unwrap();
 
         for entry in entries {
-            assert_eq!(entry, levels.get(entry.time_key()).unwrap().unwrap());
+            assert_eq!(entry, levels.get(entry.time_key()).await.unwrap().unwrap());
         }
 
         // overwrite a key
         let new_entry: Entry = (1, b"key1".to_vec(), b"value3".to_vec()).into();
-        levels.put(vec![new_entry.clone()]).unwrap();
+        levels.put(vec![new_entry.clone()]).await.unwrap();
         assert_eq!(
             new_entry,
-            levels.get(new_entry.time_key()).unwrap().unwrap()
+            levels.get(new_entry.time_key()).await.unwrap().unwrap()
         );
     }
 
-    #[test]
-    fn put_get_with_compaction() {
+    #[tokio::test]
+    async fn put_get_with_compaction() {
         let base_dir = tempdir().unwrap();
         let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
         let fn_registry = FnRegistry::new_noop();
@@ -319,16 +336,23 @@ mod test {
             fn_registry,
         });
         let timestamp_reviewer = Arc::new(Mutex::new(SimpleTimestampReviewer::new(10, 30)));
-        let mut levels = Levels::try_new(1, timestamp_reviewer, ctx.clone()).unwrap();
+        let mut levels = Levels::try_new(1, timestamp_reviewer, ctx.clone())
+            .await
+            .unwrap();
 
         for timestamp in 0..25 {
             levels
                 .put(vec![(timestamp, b"key".to_vec(), b"value".to_vec()).into()])
+                .await
                 .unwrap();
         }
 
         for timestamp in 0..25 {
-            levels.get(&(timestamp, b"key".to_vec())).unwrap().unwrap();
+            levels
+                .get(&(timestamp, b"key".to_vec()))
+                .await
+                .unwrap()
+                .unwrap();
         }
     }
 }

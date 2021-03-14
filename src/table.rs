@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -27,15 +28,15 @@ pub struct TableIterator<'a> {
 }
 
 impl<'a> TableIterator<'a> {
-    pub fn try_new(
+    pub async fn try_new(
         index: HashMap<Bytes, usize>,
         raw_entry_positions: Vec<(Bytes, u64, u64)>,
         _table_meta: TableMeta,
         vlog_filename: String,
         ctx: &'a Context,
-    ) -> Result<Self> {
+    ) -> Result<TableIterator<'a>> {
         let file_manager = &ctx.file_manager;
-        let vlog = VLog::from(file_manager.open_(vlog_filename)?);
+        let vlog = VLog::from(file_manager.open_(vlog_filename).await?);
         Ok(Self {
             curr_key: vec![],
             curr_entries: vec![],
@@ -52,12 +53,12 @@ impl<'a> TableIterator<'a> {
         })
     }
 
-    fn decompress_curr_entries(&mut self) -> Result<()> {
+    async fn decompress_curr_entries(&mut self) -> Result<()> {
         if let Some(entries) = self.cache.get(&self.curr_key) {
             self.curr_entries = entries.clone();
         } else {
             let (_, offset, length) = self.raw_entry_positions[self.curr_key_cursor];
-            let raw_entries = self.vlog.get(offset, length)?;
+            let raw_entries = self.vlog.get(offset, length).await?;
 
             let decompress_fn_name = self.ctx.fn_registry.dispatch_fn()(&self.curr_key);
             let decompress_fn = self.ctx.fn_registry.udcf(decompress_fn_name)?;
@@ -70,7 +71,7 @@ impl<'a> TableIterator<'a> {
         Ok(())
     }
 
-    fn seek(&mut self, timestamp: Timestamp, key: Bytes) -> Result<()> {
+    async fn seek(&mut self, timestamp: Timestamp, key: Bytes) -> Result<()> {
         if let Some(cursor) = self.index.get(&key) {
             self.curr_key_cursor = *cursor;
         } else {
@@ -78,7 +79,7 @@ impl<'a> TableIterator<'a> {
         }
 
         self.curr_key = key;
-        self.decompress_curr_entries()?;
+        self.decompress_curr_entries().await?;
 
         // todo: handle not found
         for i in 0..self.curr_entries.len() {
@@ -109,9 +110,10 @@ impl<'a> TableIterator<'a> {
     }
 }
 
+#[async_trait]
 impl<'a> Iterator for TableIterator<'a> {
-    fn seek(&mut self, timestamp: Timestamp, key: Bytes) -> Result<()> {
-        self.seek(timestamp, key)
+    async fn seek(&mut self, timestamp: Timestamp, key: Bytes) -> Result<()> {
+        self.seek(timestamp, key).await
     }
 
     fn next(&mut self) -> Result<()> {
@@ -182,14 +184,14 @@ impl SSTableHandle {
         }
     }
 
-    pub fn get(&self, time_key: &(Timestamp, Bytes)) -> Result<Option<Entry>> {
+    pub async fn get(&self, time_key: &(Timestamp, Bytes)) -> Result<Option<Entry>> {
         let (ts, key) = time_key;
         // todo: simplify this
         let (offset, size) = match self.get_raw(key) {
             Some(thing) => thing,
             None => return Ok(None),
         };
-        let raw_bytes = self.vlog.get(offset, size)?;
+        let raw_bytes = self.vlog.get(offset, size).await?;
 
         let decompress_fn_name = self.ctx.fn_registry.dispatch_fn()(key);
         let decompress_fn = self.ctx.fn_registry.udcf(decompress_fn_name)?;

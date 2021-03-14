@@ -13,7 +13,7 @@ pub struct VLog {
 }
 
 impl VLog {
-    pub fn get(&self, offset: u64, length: u64) -> Result<Bytes> {
+    pub async fn get(&self, offset: u64, length: u64) -> Result<Bytes> {
         let mut file = self.file.lock().unwrap();
         let mut buf = Vec::with_capacity(length as usize);
         buf.resize_with(length as usize, Default::default);
@@ -62,8 +62,8 @@ mod test {
 
     use tempfile::tempfile;
 
-    #[test]
-    fn vlog_builder() {
+    #[tokio::test]
+    async fn vlog_builder() {
         let vlog_file = tempfile().unwrap();
         let mut vlog_builder = ValueLogBuilder::try_from(vlog_file.try_clone().unwrap()).unwrap();
 
@@ -72,7 +72,13 @@ mod test {
         drop(vlog_builder);
 
         let vlog = VLog::from(vlog_file);
-        assert_eq!(vlog.get(offset1, size1).unwrap(), b"some values".to_vec());
-        assert_eq!(vlog.get(offset2, size2).unwrap(), b"some others".to_vec());
+        assert_eq!(
+            vlog.get(offset1, size1).await.unwrap(),
+            b"some values".to_vec()
+        );
+        assert_eq!(
+            vlog.get(offset2, size2).await.unwrap(),
+            b"some others".to_vec()
+        );
     }
 }

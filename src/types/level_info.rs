@@ -117,7 +117,7 @@ impl LevelInfo {
     }
 
     /// Return new level id.
-    pub fn add_level(
+    pub async fn add_level(
         &mut self,
         start: Timestamp,
         end: Timestamp,
@@ -132,21 +132,21 @@ impl LevelInfo {
         infos.push_front(new_desc);
         drop(infos);
 
-        self.sync(file_manager)?;
+        self.sync(file_manager).await?;
 
         Ok(next_id)
     }
 
-    pub fn remove_last_level(&mut self, file_manager: &FileManager) -> Result<()> {
+    pub async fn remove_last_level(&mut self, file_manager: &FileManager) -> Result<()> {
         self.infos.write().unwrap().pop_back();
 
-        self.sync(file_manager)
+        self.sync(file_manager).await
     }
 
     /// Sync file infos to disk. Requires read lock.
-    fn sync(&self, file_manager: &FileManager) -> Result<()> {
+    async fn sync(&self, file_manager: &FileManager) -> Result<()> {
         let bytes = self.encode();
-        file_manager.sync_level_info(&bytes)?;
+        file_manager.sync_level_info(&bytes).await?;
 
         Ok(())
     }
@@ -186,18 +186,18 @@ mod test {
         assert_eq!(vec![desc], infos);
     }
 
-    #[test]
-    fn add_level() {
+    #[tokio::test]
+    async fn add_level() {
         let base_dir = tempdir().unwrap();
         let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
 
         let mut info = LevelInfo::new(vec![]);
-        info.add_level(0, 9, &file_manager).unwrap();
-        info.add_level(10, 19, &file_manager).unwrap();
-        info.add_level(20, 29, &file_manager).unwrap();
+        info.add_level(0, 9, &file_manager).await.unwrap();
+        info.add_level(10, 19, &file_manager).await.unwrap();
+        info.add_level(20, 29, &file_manager).await.unwrap();
         drop(info);
 
-        let info = file_manager.open_level_info().unwrap();
+        let info = file_manager.open_level_info().await.unwrap();
         let infos: Vec<_> = info.infos.read().unwrap().iter().copied().collect();
         let expected = vec![
             LevelDesc {
