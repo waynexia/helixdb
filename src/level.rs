@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::context::Context;
 use crate::error::Result;
-use crate::file::{FileType, Rick, SSTable, TableBuilder, ValueLogBuilder};
+use crate::file::{Rick, SSTable, TableBuilder, ValueLogBuilder};
 use crate::index::MemIndex;
 use crate::types::{Bytes, Entry, LevelId, LevelInfo, ThreadId, Timestamp};
 
@@ -38,8 +38,7 @@ impl Levels {
         timestamp_reviewer: Arc<Mutex<dyn TimestampReviewer>>,
         ctx: Arc<Context>,
     ) -> Result<Self> {
-        let (rick, _) = ctx.file_manager.create(FileType::Rick).await?;
-        let rick = Rick::from(rick);
+        let rick = Rick::from(ctx.file_manager.open_rick(tid).await?);
         let level_info = ctx.file_manager.open_level_info().await?;
 
         Ok(Self {
@@ -109,7 +108,9 @@ impl Levels {
             .file_manager
             .open_sstable(self.tid, level_id)
             .await?;
-        let handle = SSTable::from(table_file).handle(self.ctx.clone()).await?;
+        let handle = SSTable::new(table_file, self.tid, level_id)
+            .handle(self.ctx.clone())
+            .await?;
 
         handle.get(time_key).await
     }
@@ -146,8 +147,7 @@ impl Levels {
                 .open_sstable(self.tid, level_id)
                 .await?,
         );
-        let (vlog_builder, vlog_filename) =
-            self.ctx.file_manager.open_vlog(self.tid, level_id).await?;
+        let vlog_builder = self.ctx.file_manager.open_vlog(self.tid, level_id).await?;
         let mut vlog_builder = ValueLogBuilder::try_from(vlog_builder)?;
         let mut value_positions = vec![];
 
@@ -179,7 +179,7 @@ impl Levels {
 
         // make sstable
         table_builder.add_entries(keys, value_positions);
-        table_builder.finish(vlog_filename).await?;
+        table_builder.finish().await?;
 
         self.rick.clean().await?;
 

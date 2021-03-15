@@ -47,7 +47,7 @@ impl ValueLogBuilder {
 impl TryFrom<File> for ValueLogBuilder {
     type Error = HelixError;
 
-    fn try_from(mut file: File) -> Result<Self> {
+    fn try_from(file: File) -> Result<Self> {
         Ok(Self { file, file_size: 0 })
     }
 }

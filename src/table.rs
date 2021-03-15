@@ -30,11 +30,9 @@ impl<'a> TableIterator<'a> {
         index: HashMap<Bytes, usize>,
         raw_entry_positions: Vec<(Bytes, u64, u64)>,
         _table_meta: TableMeta,
-        vlog_filename: String,
         ctx: &'a Context,
+        vlog: VLog,
     ) -> Result<TableIterator<'a>> {
-        let file_manager = &ctx.file_manager;
-        let vlog = VLog::from(file_manager.open_(vlog_filename).await?);
         Ok(Self {
             curr_key: vec![],
             curr_entries: vec![],

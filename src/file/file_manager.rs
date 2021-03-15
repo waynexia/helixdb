@@ -1,6 +1,5 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::Result;
 use crate::io::File;
@@ -52,31 +51,6 @@ impl FileManager {
         })
     }
 
-    /// filename is consist of general prefix, file type and creating timestamp.
-    /// For example, `helix-manifest-160000000.hlx`
-    #[deprecated]
-    pub async fn create(&self, ty: FileType) -> Result<(File, String)> {
-        if let FileType::Others(filename) = ty {
-            return self.create_others(filename).await;
-        }
-
-        let filename = self.base_dir.join(format!(
-            "{}-{}-{}.{}",
-            COMMON_FILE_PREFIX,
-            ty.file_name_desc(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-            COMMON_FILE_EXTENSION
-        ));
-
-        let file = File::open(filename.clone()).await?;
-        let filename = filename.into_os_string().into_string().unwrap();
-
-        Ok((file, filename))
-    }
-
     // might deprecate this.
     /// Create files in `Others` type. Like `LEVEL_INFO`.
     async fn create_others(&self, filename: String) -> Result<(File, String)> {
@@ -87,18 +61,17 @@ impl FileManager {
         Ok((file, filename))
     }
 
-    pub async fn open_<P: AsRef<Path>>(&self, filename: P) -> Result<File> {
-        Ok(File::open(filename).await?)
-    }
-
-    /// open or create required file.
-    pub async fn open(&self, tid: ThreadId, ty: FileType) -> Result<File> {
-        todo!()
-    }
-
     /// Initialize / recover manager's state from manifest file.
     fn init() -> Result<()> {
         todo!()
+    }
+
+    pub async fn open_rick(&self, tid: ThreadId) -> Result<File> {
+        let filename = self
+            .base_dir
+            .join(format!("{}-{}.{}", "rick", tid, BINARY_FILE_EXTENSION));
+
+        Ok(File::open(filename).await?)
     }
 
     pub async fn open_sstable(&self, tid: ThreadId, level_id: LevelId) -> Result<File> {
@@ -110,17 +83,13 @@ impl FileManager {
         Ok(File::open(filename).await?)
     }
 
-    // todo: remove vlog_name in return value
-    pub async fn open_vlog(&self, tid: ThreadId, level_id: LevelId) -> Result<(File, String)> {
+    pub async fn open_vlog(&self, tid: ThreadId, level_id: LevelId) -> Result<File> {
         let filename = self.base_dir.join(format!(
             "{}-{}-{}.{}",
             "vlog", tid, level_id, BINARY_FILE_EXTENSION,
         ));
 
-        Ok((
-            File::open(filename.clone()).await?,
-            filename.into_os_string().into_string().unwrap(),
-        ))
+        Ok(File::open(filename).await?)
     }
 
     /// Open or create [LevelInfo].
@@ -163,7 +132,7 @@ mod test {
             let base_dir = tempdir().unwrap();
 
             let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
-            let _ = file_manager.create(FileType::Manifest).await.unwrap();
+            let _ = file_manager.open_rick(1).await.unwrap();
             assert_eq!(base_dir.path().read_dir().unwrap().count(), 1);
         });
     }

@@ -8,13 +8,23 @@ use crate::error::Result;
 use crate::file::VLog;
 use crate::io::File;
 use crate::table::{SSTableHandle, TableIterator};
-use crate::types::{Bytes, Timestamp};
+use crate::types::{Bytes, LevelId, ThreadId, Timestamp};
 
 pub struct SSTable {
     file: File,
+    tid: ThreadId,
+    level_id: LevelId,
 }
 
 impl SSTable {
+    pub fn new(file: File, tid: ThreadId, level_id: LevelId) -> Self {
+        Self {
+            file,
+            tid,
+            level_id,
+        }
+    }
+
     #[deprecated]
     pub fn metadata(&self) -> Result<TableMeta> {
         Ok(TableMeta {
@@ -25,9 +35,8 @@ impl SSTable {
 
     /// Get read handle of SSTable.
     pub async fn handle(&mut self, ctx: Arc<Context>) -> Result<SSTableHandle> {
-        let (index, raw_entry_positions, _) = self.read_table().await?;
-        let vlog_filename = self.read_vlog_filename().await?.0;
-        let vlog = VLog::from(ctx.file_manager.open_(vlog_filename).await?);
+        let (index, raw_entry_positions) = self.read_table().await?;
+        let vlog = VLog::from(ctx.file_manager.open_vlog(self.tid, self.level_id).await?);
 
         Ok(SSTableHandle::new(
             ctx,
@@ -45,49 +54,22 @@ impl SSTable {
     /// Todo: avoid read all data?
     // todo: fix clippy needless_lifetimes?
     pub async fn iterator<'ctx>(&mut self, ctx: &'ctx Context) -> Result<TableIterator<'ctx>> {
-        let (index, raw_entry_positions, vlog_filename) = self.read_table().await?;
+        let (index, raw_entry_positions) = self.read_table().await?;
+        let vlog = VLog::from(ctx.file_manager.open_vlog(self.tid, self.level_id).await?);
 
-        TableIterator::try_new(
-            index,
-            raw_entry_positions,
-            self.metadata()?,
-            vlog_filename,
-            ctx,
-        )
-        .await
-    }
-
-    async fn read_vlog_filename(&mut self) -> Result<(String, u64)> {
-        let file_size = self.file.size().await?;
-        let u64_size = size_of::<u64>() as u64;
-        let filename_length_buf = self.file.read(file_size - u64_size, u64_size).await?;
-        let filename_length = u64::from_le_bytes(filename_length_buf.try_into().unwrap());
-
-        let filename_buf = self
-            .file
-            .read(file_size - u64_size - filename_length, filename_length)
-            .await?;
-        let vlog_filename = String::from_utf8(filename_buf).unwrap();
-
-        Ok((vlog_filename, filename_length + u64_size))
+        TableIterator::try_new(index, raw_entry_positions, self.metadata()?, ctx, vlog).await
     }
 
     // todo: remove this temp method.
-    /// out-param: index, raw_entry_positions, vlog_filename.
+    /// out-param: index, raw_entry_positions.
     #[allow(clippy::type_complexity)]
-    async fn read_table(
-        &mut self,
-    ) -> Result<(HashMap<Bytes, usize>, Vec<(Bytes, u64, u64)>, String)> {
+    async fn read_table(&mut self) -> Result<(HashMap<Bytes, usize>, Vec<(Bytes, u64, u64)>)> {
         let mut table_index = HashMap::new();
         const PREFIX_LENGTH: usize = 3 * size_of::<u64>();
         const PREFIX_UNIT_LENGTH: usize = size_of::<u64>();
 
-        // get vlog filename
-        let (vlog_filename, tail_length) = self.read_vlog_filename().await?;
-
         // get data block size
-        let file_size = self.file.size().await?;
-        let data_block_size = file_size - tail_length;
+        let data_block_size = self.file.size().await?;
 
         // make key-value index
         let mut raw_entry_positions = vec![];
@@ -120,13 +102,7 @@ impl SSTable {
             }
         }
 
-        Ok((table_index, raw_entry_positions, vlog_filename))
-    }
-}
-
-impl From<File> for SSTable {
-    fn from(file: File) -> Self {
-        Self { file }
+        Ok((table_index, raw_entry_positions))
     }
 }
 
@@ -157,16 +133,10 @@ impl TableBuilder {
     }
 
     /// Consume this builder to build a SSTable.
-    pub async fn finish(self, vlog_filename: String) -> Result<()> {
+    pub async fn finish(self) -> Result<()> {
         // write data block
         let data_block_size = self.entry_buffer.len() as u64;
         self.file.write(self.entry_buffer, 0).await?;
-
-        // vlog filename
-        let filename_length = vlog_filename.len() as u64;
-        let mut tail_buf = vlog_filename.into_bytes();
-        tail_buf.extend_from_slice(&filename_length.to_le_bytes());
-        self.file.write(tail_buf, data_block_size).await?;
 
         // todo: other blocks
 
@@ -227,15 +197,13 @@ mod test {
             let keys = vec![b"key1".to_vec(), b"key2key2".to_vec(), b"key333".to_vec()];
             let offsets = vec![(1, 1), (2, 2), (3, 3)];
             table_builder.add_entries(keys.clone(), offsets.clone());
-            table_builder
-                .finish(base_dir.path().join("foo").to_str().unwrap().to_owned())
-                .await
-                .unwrap();
+            table_builder.finish().await.unwrap();
 
-            let table_handle = SSTable::from(ctx.file_manager.open_sstable(1, 1).await.unwrap())
-                .handle(ctx)
-                .await
-                .unwrap();
+            let table_handle =
+                SSTable::new(ctx.file_manager.open_sstable(1, 1).await.unwrap(), 1, 1)
+                    .handle(ctx)
+                    .await
+                    .unwrap();
 
             for (key, offset) in keys.into_iter().zip(offsets.into_iter()) {
                 assert_eq!(table_handle.get_raw(&key).unwrap(), offset);

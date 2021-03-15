@@ -6,6 +6,8 @@ use crate::io::File;
 use crate::types::{Bytes, Entry, EntryMeta, Timestamp};
 
 /// Handles to entries in rick (level 0).
+///
+/// Every shard will only have up to one rick file at any time.
 pub struct Rick {
     file: File,
 }
@@ -158,7 +160,7 @@ impl From<File> for Rick {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::file::file_manager::{FileManager, FileType};
+    use crate::file::file_manager::FileManager;
 
     use glommio::LocalExecutor;
     use tempfile::tempdir;
@@ -170,8 +172,7 @@ mod test {
         ex.run(async {
             let base_dir = tempdir().unwrap();
             let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
-            let (rick_file, _) = file_manager.create(FileType::Rick).await.unwrap();
-            let mut rick = Rick::from(rick_file);
+            let mut rick = Rick::from(file_manager.open_rick(1).await.unwrap());
 
             let entry = Entry {
                 timestamp: 1,
