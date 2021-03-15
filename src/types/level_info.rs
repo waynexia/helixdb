@@ -62,8 +62,6 @@ impl LevelInfo {
         }
         let batch = fbb.end_vector::<protos::LevelDesc>(infos.len());
 
-        // println!("batch: {:?}",batch.va)
-
         let infos =
             protos::LevelInfo::create(&mut fbb, &protos::LevelInfoArgs { infos: Some(batch) });
 
@@ -146,7 +144,7 @@ impl LevelInfo {
     /// Sync file infos to disk. Requires read lock.
     async fn sync(&self, file_manager: &FileManager) -> Result<()> {
         let bytes = self.encode();
-        file_manager.sync_level_info(&bytes).await?;
+        file_manager.sync_level_info(bytes).await?;
 
         Ok(())
     }
@@ -164,10 +162,9 @@ impl LevelInfo {
 #[cfg(test)]
 mod test {
 
-    use std::convert::TryInto;
-
     use super::*;
 
+    use glommio::LocalExecutor;
     use tempfile::tempdir;
 
     #[test]
@@ -186,37 +183,40 @@ mod test {
         assert_eq!(vec![desc], infos);
     }
 
-    #[tokio::test]
-    async fn add_level() {
-        let base_dir = tempdir().unwrap();
-        let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
+    #[test]
+    fn add_level() {
+        let ex = LocalExecutor::default();
+        ex.run(async {
+            let base_dir = tempdir().unwrap();
+            let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
 
-        let mut info = LevelInfo::new(vec![]);
-        info.add_level(0, 9, &file_manager).await.unwrap();
-        info.add_level(10, 19, &file_manager).await.unwrap();
-        info.add_level(20, 29, &file_manager).await.unwrap();
-        drop(info);
+            let mut info = LevelInfo::new(vec![]);
+            info.add_level(0, 9, &file_manager).await.unwrap();
+            info.add_level(10, 19, &file_manager).await.unwrap();
+            info.add_level(20, 29, &file_manager).await.unwrap();
+            drop(info);
 
-        let info = file_manager.open_level_info().await.unwrap();
-        let infos: Vec<_> = info.infos.read().unwrap().iter().copied().collect();
-        let expected = vec![
-            LevelDesc {
-                start: 0,
-                end: 9,
-                id: 1,
-            },
-            LevelDesc {
-                start: 10,
-                end: 19,
-                id: 2,
-            },
-            LevelDesc {
-                start: 20,
-                end: 29,
-                id: 3,
-            },
-        ];
+            let info = file_manager.open_level_info().await.unwrap();
+            let infos: Vec<_> = info.infos.read().unwrap().iter().copied().collect();
+            let expected = vec![
+                LevelDesc {
+                    start: 0,
+                    end: 9,
+                    id: 1,
+                },
+                LevelDesc {
+                    start: 10,
+                    end: 19,
+                    id: 2,
+                },
+                LevelDesc {
+                    start: 20,
+                    end: 29,
+                    id: 3,
+                },
+            ];
 
-        assert_eq!(infos, expected);
+            assert_eq!(infos, expected);
+        });
     }
 }

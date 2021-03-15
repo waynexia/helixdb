@@ -1,6 +1,6 @@
 use crate::error::Result;
 use crate::file::FileManager;
-use crate::types::{LevelDesc, LevelId, LevelInfo, Timestamp};
+use crate::types::{LevelId, Timestamp};
 
 #[deprecated]
 pub struct LevelInfoHandle {}

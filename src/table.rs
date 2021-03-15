@@ -1,11 +1,9 @@
-use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::context::Context;
 use crate::error::Result;
 use crate::file::{TableMeta, VLog};
-use crate::iterator::Iterator;
 use crate::types::{Bytes, Entry, Timestamp};
 
 pub struct TableIterator<'a> {
@@ -110,34 +108,35 @@ impl<'a> TableIterator<'a> {
     }
 }
 
-#[async_trait]
-impl<'a> Iterator for TableIterator<'a> {
-    async fn seek(&mut self, timestamp: Timestamp, key: Bytes) -> Result<()> {
-        self.seek(timestamp, key).await
-    }
+// todo: resolve this async trait
+// #[async_trait]
+// impl<'a> Iterator for TableIterator<'a> {
+//     async fn seek(&mut self, timestamp: Timestamp, key: Bytes) -> Result<()> {
+//         self.seek(timestamp, key).await
+//     }
 
-    fn next(&mut self) -> Result<()> {
-        self.next();
-        Ok(())
-    }
+//     fn next(&mut self) -> Result<()> {
+//         self.next();
+//         Ok(())
+//     }
 
-    fn timestamp(&self) -> Result<Timestamp> {
-        let timestamp = self.curr_entries[self.curr_entry_cursor].0;
-        Ok(timestamp)
-    }
+//     fn timestamp(&self) -> Result<Timestamp> {
+//         let timestamp = self.curr_entries[self.curr_entry_cursor].0;
+//         Ok(timestamp)
+//     }
 
-    fn key(&self) -> Result<&Bytes> {
-        Ok(&self.curr_key)
-    }
+//     fn key(&self) -> Result<&Bytes> {
+//         Ok(&self.curr_key)
+//     }
 
-    fn value(&self) -> Result<Bytes> {
-        Ok(self.curr_entries[self.curr_entry_cursor].1.clone())
-    }
+//     fn value(&self) -> Result<Bytes> {
+//         Ok(self.curr_entries[self.curr_entry_cursor].1.clone())
+//     }
 
-    fn is_valid(&self) -> bool {
-        self.is_valid
-    }
-}
+//     fn is_valid(&self) -> bool {
+//         self.is_valid
+//     }
+// }
 
 // todo: make a general cache
 #[derive(Default)]

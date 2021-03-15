@@ -1,13 +1,9 @@
-use std::fs::{self, remove_file, File};
-// use std::fs;
-use std::io::Read;
-use std::io::Write;
-use std::io::{Seek, SeekFrom};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::Result;
-// use crate::io::File;
+use crate::io::File;
 use crate::types::{Bytes, LevelId, LevelInfo, ThreadId};
 
 const COMMON_FILE_PREFIX: &str = "helix";
@@ -75,12 +71,7 @@ impl FileManager {
             COMMON_FILE_EXTENSION
         ));
 
-        let file = File::with_options()
-            .read(true)
-            .write(true)
-            .truncate(false)
-            .create(true)
-            .open(filename.clone())?;
+        let file = File::open(filename.clone()).await?;
         let filename = filename.into_os_string().into_string().unwrap();
 
         Ok((file, filename))
@@ -90,30 +81,14 @@ impl FileManager {
     /// Create files in `Others` type. Like `LEVEL_INFO`.
     async fn create_others(&self, filename: String) -> Result<(File, String)> {
         let filename = self.base_dir.join(filename);
-        let file = File::with_options()
-            .read(true)
-            .write(true)
-            .truncate(false)
-            .create(true)
-            .open(filename.clone())?;
+        let file = File::open(filename.clone()).await?;
         let filename = filename.into_os_string().into_string().unwrap();
 
         Ok((file, filename))
     }
 
-    pub async fn remove<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        remove_file(path)?;
-
-        Ok(())
-    }
-
     pub async fn open_<P: AsRef<Path>>(&self, filename: P) -> Result<File> {
-        Ok(File::with_options()
-            .read(true)
-            .write(true)
-            .truncate(false)
-            .create(true)
-            .open(filename)?)
+        Ok(File::open(filename).await?)
     }
 
     /// open or create required file.
@@ -132,12 +107,7 @@ impl FileManager {
             "sst", tid, level_id, BINARY_FILE_EXTENSION,
         ));
 
-        Ok(File::with_options()
-            .read(true)
-            .write(true)
-            .truncate(false)
-            .create(true)
-            .open(filename)?)
+        Ok(File::open(filename).await?)
     }
 
     // todo: remove vlog_name in return value
@@ -148,12 +118,7 @@ impl FileManager {
         ));
 
         Ok((
-            File::with_options()
-                .read(true)
-                .write(true)
-                .truncate(false)
-                .create(true)
-                .open(filename.clone())?,
+            File::open(filename.clone()).await?,
             filename.into_os_string().into_string().unwrap(),
         ))
     }
@@ -161,17 +126,11 @@ impl FileManager {
     /// Open or create [LevelInfo].
     pub async fn open_level_info(&self) -> Result<LevelInfo> {
         let filename = self.base_dir.join(LEVEL_INFO_FILENAME);
-        let mut file = File::with_options()
-            .read(true)
-            .write(true)
-            .truncate(false)
-            .create(true)
-            .open(filename)?;
+        let file = File::open(filename).await?;
 
         // read all
-        let mut buf = vec![];
-        file.seek(SeekFrom::Start(0))?;
-        file.read_to_end(&mut buf)?;
+        let size = file.size().await?;
+        let buf = file.read(0, size).await?;
 
         let level_info = LevelInfo::decode(&buf);
         Ok(level_info)
@@ -179,17 +138,12 @@ impl FileManager {
 
     // todo: correct this.
     /// Refresh (overwrite) level info file.
-    pub async fn sync_level_info(&self, bytes: &Bytes) -> Result<()> {
+    pub async fn sync_level_info(&self, bytes: Bytes) -> Result<()> {
         let filename = self.base_dir.join(LEVEL_INFO_FILENAME);
-        let mut file = File::with_options()
-            .read(true)
-            .write(true)
-            .truncate(false)
-            .create(true)
-            .open(filename)?;
+        let file = File::open(filename).await?;
 
-        file.write_all(bytes)?;
-        file.sync_all()?;
+        file.write(bytes, 0).await?;
+        file.sync().await?;
 
         Ok(())
     }
@@ -199,14 +153,18 @@ impl FileManager {
 mod test {
     use super::*;
 
+    use glommio::LocalExecutor;
     use tempfile::tempdir;
 
-    #[tokio::test]
-    async fn new_file_manager() {
-        let base_dir = tempdir().unwrap();
+    #[test]
+    fn new_file_manager() {
+        let ex = LocalExecutor::default();
+        ex.run(async {
+            let base_dir = tempdir().unwrap();
 
-        let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
-        let _ = file_manager.create(FileType::Manifest).await.unwrap();
-        assert_eq!(base_dir.path().read_dir().unwrap().count(), 1);
+            let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
+            let _ = file_manager.create(FileType::Manifest).await.unwrap();
+            assert_eq!(base_dir.path().read_dir().unwrap().count(), 1);
+        });
     }
 }

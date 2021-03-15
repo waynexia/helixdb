@@ -1,4 +1,4 @@
-use flatbuffers::{FlatBufferBuilder, Follow};
+use flatbuffers::FlatBufferBuilder;
 use std::{convert::TryInto, mem};
 
 pub type Bytes = Vec<u8>;
@@ -37,7 +37,7 @@ impl Entry {
         fbb.finished_data().to_vec()
     }
 
-    pub fn decode(bytes: &Bytes) -> Self {
+    pub fn decode(bytes: &[u8]) -> Self {
         let fb_entry = flatbuffers::get_root::<protos::Entry<'_>>(bytes);
 
         Self {

@@ -152,7 +152,7 @@ impl Levels {
         let mut value_positions = vec![];
 
         // make entry_map
-        let entries = self.rick.entry_list()?;
+        let entries = self.rick.entry_list().await?;
         let mut entry_map = HashMap::new();
         for entry in entries {
             let Entry {
@@ -172,16 +172,16 @@ impl Levels {
             let compress_fn = self.ctx.fn_registry.udcf(compress_fn_name)?.compress();
             let compressed_data = compress_fn(key.clone(), ts_value);
 
-            let (offset, size) = vlog_builder.add_entry(compressed_data)?;
+            let (offset, size) = vlog_builder.add_entry(compressed_data).await?;
             value_positions.push((offset, size));
             keys.push(key);
         }
 
         // make sstable
         table_builder.add_entries(keys, value_positions);
-        table_builder.finish(vlog_filename)?;
+        table_builder.finish(vlog_filename).await?;
 
-        self.rick.clean()?;
+        self.rick.clean().await?;
 
         Ok(())
     }
@@ -267,6 +267,7 @@ mod test {
     use crate::file::FileManager;
     use crate::fn_registry::FnRegistry;
 
+    use glommio::LocalExecutor;
     use tempfile::tempdir;
 
     #[tokio::test]
@@ -290,69 +291,75 @@ mod test {
         assert_eq!(actions, expected);
     }
 
-    #[tokio::test]
-    async fn put_get_on_rick() {
-        let base_dir = tempdir().unwrap();
-        let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
-        let fn_registry = FnRegistry::new_noop();
-        let ctx = Arc::new(Context {
-            file_manager,
-            fn_registry,
+    #[test]
+    fn put_get_on_rick() {
+        let ex = LocalExecutor::default();
+        ex.run(async {
+            let base_dir = tempdir().unwrap();
+            let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
+            let fn_registry = FnRegistry::new_noop();
+            let ctx = Arc::new(Context {
+                file_manager,
+                fn_registry,
+            });
+            let timestamp_reviewer = Arc::new(Mutex::new(SimpleTimestampReviewer::new(10, 30)));
+            let mut levels = Levels::try_new(1, timestamp_reviewer, ctx).await.unwrap();
+
+            let entries = vec![
+                (1, b"key1".to_vec(), b"value1".to_vec()).into(),
+                (2, b"key1".to_vec(), b"value1".to_vec()).into(),
+                (3, b"key1".to_vec(), b"value1".to_vec()).into(),
+                (1, b"key2".to_vec(), b"value2".to_vec()).into(),
+                (2, b"key2".to_vec(), b"value2".to_vec()).into(),
+                (3, b"key3".to_vec(), b"value1".to_vec()).into(),
+            ];
+
+            levels.put(entries.clone()).await.unwrap();
+
+            for entry in entries {
+                assert_eq!(entry, levels.get(entry.time_key()).await.unwrap().unwrap());
+            }
+
+            // overwrite a key
+            let new_entry: Entry = (1, b"key1".to_vec(), b"value3".to_vec()).into();
+            levels.put(vec![new_entry.clone()]).await.unwrap();
+            assert_eq!(
+                new_entry,
+                levels.get(new_entry.time_key()).await.unwrap().unwrap()
+            );
         });
-        let timestamp_reviewer = Arc::new(Mutex::new(SimpleTimestampReviewer::new(10, 30)));
-        let mut levels = Levels::try_new(1, timestamp_reviewer, ctx).await.unwrap();
-
-        let entries = vec![
-            (1, b"key1".to_vec(), b"value1".to_vec()).into(),
-            (2, b"key1".to_vec(), b"value1".to_vec()).into(),
-            (3, b"key1".to_vec(), b"value1".to_vec()).into(),
-            (1, b"key2".to_vec(), b"value2".to_vec()).into(),
-            (2, b"key2".to_vec(), b"value2".to_vec()).into(),
-            (3, b"key1".to_vec(), b"value1".to_vec()).into(),
-        ];
-
-        levels.put(entries.clone()).await.unwrap();
-
-        for entry in entries {
-            assert_eq!(entry, levels.get(entry.time_key()).await.unwrap().unwrap());
-        }
-
-        // overwrite a key
-        let new_entry: Entry = (1, b"key1".to_vec(), b"value3".to_vec()).into();
-        levels.put(vec![new_entry.clone()]).await.unwrap();
-        assert_eq!(
-            new_entry,
-            levels.get(new_entry.time_key()).await.unwrap().unwrap()
-        );
     }
 
-    #[tokio::test]
-    async fn put_get_with_compaction() {
-        let base_dir = tempdir().unwrap();
-        let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
-        let fn_registry = FnRegistry::new_noop();
-        let ctx = Arc::new(Context {
-            file_manager,
-            fn_registry,
+    #[test]
+    fn put_get_with_compaction() {
+        let ex = LocalExecutor::default();
+        ex.run(async {
+            let base_dir = tempdir().unwrap();
+            let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
+            let fn_registry = FnRegistry::new_noop();
+            let ctx = Arc::new(Context {
+                file_manager,
+                fn_registry,
+            });
+            let timestamp_reviewer = Arc::new(Mutex::new(SimpleTimestampReviewer::new(10, 30)));
+            let mut levels = Levels::try_new(1, timestamp_reviewer, ctx.clone())
+                .await
+                .unwrap();
+
+            for timestamp in 0..25 {
+                levels
+                    .put(vec![(timestamp, b"key".to_vec(), b"value".to_vec()).into()])
+                    .await
+                    .unwrap();
+            }
+
+            for timestamp in 0..25 {
+                levels
+                    .get(&(timestamp, b"key".to_vec()))
+                    .await
+                    .unwrap()
+                    .unwrap();
+            }
         });
-        let timestamp_reviewer = Arc::new(Mutex::new(SimpleTimestampReviewer::new(10, 30)));
-        let mut levels = Levels::try_new(1, timestamp_reviewer, ctx.clone())
-            .await
-            .unwrap();
-
-        for timestamp in 0..25 {
-            levels
-                .put(vec![(timestamp, b"key".to_vec(), b"value".to_vec()).into()])
-                .await
-                .unwrap();
-        }
-
-        for timestamp in 0..25 {
-            levels
-                .get(&(timestamp, b"key".to_vec()))
-                .await
-                .unwrap()
-                .unwrap();
-        }
     }
 }
