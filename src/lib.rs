@@ -5,6 +5,7 @@
 #![feature(trait_alias)]
 #![feature(new_uninit)]
 
+mod blocks;
 mod context;
 mod db;
 mod error;
