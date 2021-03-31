@@ -6,6 +6,7 @@
 #![feature(new_uninit)]
 
 mod blocks;
+mod cache;
 mod context;
 mod db;
 mod error;

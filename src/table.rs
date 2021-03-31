@@ -4,7 +4,22 @@ use std::sync::Arc;
 use crate::context::Context;
 use crate::error::Result;
 use crate::file::{TableMeta, VLog};
-use crate::types::{Bytes, Entry, Timestamp};
+use crate::types::{Bytes, Entry, LevelId, ThreadId, Timestamp};
+
+#[derive(Hash, PartialEq, Eq)]
+pub struct TableIdentifier {
+    pub tid: ThreadId,
+    pub lid: LevelId,
+}
+
+impl From<(ThreadId, LevelId)> for TableIdentifier {
+    fn from(ids: (ThreadId, LevelId)) -> Self {
+        Self {
+            tid: ids.0,
+            lid: ids.1,
+        }
+    }
+}
 
 pub struct TableIterator<'a> {
     /// map of key to (value offset, value size)

@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
+use crate::cache::{Cache, CacheConfig};
 use crate::context::Context;
 use crate::error::Result;
 use crate::file::{Rick, SSTable, TableBuilder, ValueLogBuilder};
@@ -30,6 +32,7 @@ pub struct Levels {
     memindex: MemIndex,
     rick: Rick,
     level_info: LevelInfo,
+    cache: Cache,
 }
 
 impl Levels {
@@ -41,6 +44,10 @@ impl Levels {
         let rick = Rick::from(ctx.file_manager.open_rick(tid).await?);
         let level_info = ctx.file_manager.open_level_info().await?;
 
+        let cache = Cache::new(CacheConfig {
+            table_handle_size: 8,
+        });
+
         Ok(Self {
             tid,
             timestamp_reviewer,
@@ -48,6 +55,7 @@ impl Levels {
             memindex: MemIndex::default(),
             rick,
             level_info,
+            cache,
         })
     }
 
@@ -102,15 +110,24 @@ impl Levels {
         time_key: &(Timestamp, Bytes),
         level_id: LevelId,
     ) -> Result<Option<Entry>> {
-        // todo: cache handle.
-        let table_file = self
-            .ctx
-            .file_manager
-            .open_sstable(self.tid, level_id)
-            .await?;
-        let handle = SSTable::new(table_file, self.tid, level_id)
-            .handle(self.ctx.clone())
-            .await?;
+        let handle = if let Some(handle) = self.cache.get_table_handle(&(self.tid, level_id).into())
+        {
+            handle
+        } else {
+            let table_file = self
+                .ctx
+                .file_manager
+                .open_sstable(self.tid, level_id)
+                .await?;
+            let handle = SSTable::new(table_file, self.tid, level_id)
+                .handle(self.ctx.clone())
+                .await?;
+
+            let handle = Rc::new(handle);
+            self.cache
+                .put_table_handle((self.tid, level_id).into(), handle.clone());
+            handle
+        };
 
         handle.get(time_key).await
     }

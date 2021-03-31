@@ -12,6 +12,7 @@ io-uring = "0.5.0"
 tokio = { version = "1.0", features = ["full"] }
 glommio = "0.3"
 async-trait = "0.1.48"
+lru = "0.6"
 
 [dev-dependencies]
 tempfile = "3.2"
