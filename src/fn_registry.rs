@@ -13,7 +13,7 @@ pub type CompressFn = Arc<dyn Fn(Bytes, Vec<(Timestamp, Bytes)>) -> Bytes + Send
 
 /// The inputs are key and compressed bytes.
 /// Output is [(timestamp, values),]
-pub type DecompressFn = Arc<dyn Fn(Bytes, Bytes) -> Vec<(Timestamp, Bytes)> + Send + Sync>;
+pub type DecompressFn = Arc<dyn Fn(Bytes, &Bytes) -> Vec<(Timestamp, Bytes)> + Send + Sync>;
 
 /// `UDCF` stands for "User Defined Compress Function".
 /// Includes compress and decompress implementation.
@@ -95,7 +95,7 @@ impl FnRegistry {
             .ok_or(HelixError::NotFound)
     }
 
-    pub fn decompress_entries(&self, key: &Bytes, data: Bytes) -> Vec<(Timestamp, Bytes)> {
+    pub fn decompress_entries(&self, key: &Bytes, data: &Bytes) -> Vec<(Timestamp, Bytes)> {
         todo!()
     }
 }
@@ -148,7 +148,7 @@ pub fn noop_udcf() -> UDCF {
     const TIMESTAMP_SIZE: usize = std::mem::size_of::<Timestamp>();
     const U64_SIZE: usize = std::mem::size_of::<u64>();
     let decompress_fn: DecompressFn = Arc::new(|_key, raw_values| {
-        let mut raw_values: VecDeque<u8> = raw_values.into();
+        let mut raw_values: VecDeque<u8> = raw_values.clone().into();
         let mut len = raw_values.len();
 
         // decode `N`
@@ -203,7 +203,7 @@ mod test {
         ];
 
         let compressed = udcf.compress()(key.clone(), ts_values.clone());
-        let decompressed = udcf.decompress()(key, compressed);
+        let decompressed = udcf.decompress()(key, &compressed);
 
         assert_eq!(ts_values, decompressed);
     }

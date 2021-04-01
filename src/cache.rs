@@ -40,6 +40,7 @@ impl Default for CacheConfig {
 ///
 /// As the total space for caching is limited, cache small and frequent (or hot) is better.
 pub struct Cache {
+    config: CacheConfig,
     handle_cache: RefCell<LruCache<TableIdentifier, Rc<SSTableHandle>>>,
 
     kv_cache: RefCell<LruCache<(Timestamp, Bytes), Bytes>>,
@@ -74,8 +75,24 @@ impl Cache {
         KeyCacheResult::NotFound
     }
 
-    pub fn put_key(&self) {
-        todo!()
+    pub fn put_key(&self, key_entry: KeyCacheEntry) {
+        if let Some(value) = key_entry.value {
+            if value.len() < self.config.kv_cache_threshold {
+                self.kv_cache
+                    .borrow_mut()
+                    .put(key_entry.key.to_owned(), value.to_owned());
+            }
+        } else if let Some(compressed) = key_entry.compressed {
+            if compressed.len() < self.config.kv_cache_threshold {
+                self.kc_cache
+                    .borrow_mut()
+                    .put(key_entry.key.to_owned(), compressed.to_owned());
+            }
+        } else if let Some(position) = key_entry.position {
+            self.kp_cache
+                .borrow_mut()
+                .put(key_entry.key.to_owned(), position);
+        }
     }
 }
 
@@ -84,4 +101,23 @@ pub enum KeyCacheResult {
     Compressed(Bytes),
     Position(ThreadId, LevelId, usize, usize),
     NotFound,
+}
+
+/// For inserting Key into cache.
+pub struct KeyCacheEntry<'a> {
+    pub key: &'a (Timestamp, Bytes),
+    pub value: Option<&'a Bytes>,
+    pub compressed: Option<&'a Bytes>,
+    pub position: Option<(ThreadId, LevelId, usize, usize)>,
+}
+
+impl<'a> KeyCacheEntry<'a> {
+    pub fn new(key: &'a (Timestamp, Bytes)) -> Self {
+        Self {
+            key,
+            value: None,
+            compressed: None,
+            position: None,
+        }
+    }
 }

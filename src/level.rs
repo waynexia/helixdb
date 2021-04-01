@@ -3,7 +3,7 @@ use std::convert::TryFrom;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-use crate::cache::{Cache, CacheConfig, KeyCacheResult};
+use crate::cache::{Cache, CacheConfig, KeyCacheEntry, KeyCacheResult};
 use crate::context::Context;
 use crate::error::Result;
 use crate::file::{Rick, SSTable, TableBuilder, VLog, ValueLogBuilder};
@@ -102,23 +102,28 @@ impl Levels {
         Ok(None)
     }
 
+    // todo: refine
     #[inline]
     async fn get_from_table(
         &mut self,
         time_key: &(Timestamp, Bytes),
         level_id: LevelId,
     ) -> Result<Option<Entry>> {
-        match self.cache.get_key(time_key) {
-            KeyCacheResult::Value(value) => Ok(Some(Entry {
-                timestamp: time_key.0,
-                key: time_key.1.to_owned(),
-                value,
-            })),
+        let mut key_cache_entry = KeyCacheEntry::new(time_key);
+
+        let entry = match self.cache.get_key(time_key) {
+            KeyCacheResult::Value(value) => {
+                return Ok(Some(Entry {
+                    timestamp: time_key.0,
+                    key: time_key.1.to_owned(),
+                    value,
+                }))
+            }
             KeyCacheResult::Compressed(compressed) => {
                 let entries = self
                     .ctx
                     .fn_registry
-                    .decompress_entries(&time_key.1, compressed);
+                    .decompress_entries(&time_key.1, &compressed);
 
                 let index = match entries
                     .binary_search_by_key(&time_key.0, |(ts, _)| *ts)
@@ -128,6 +133,9 @@ impl Levels {
                     None => return Ok(None),
                 };
                 let (timestamp, value) = &entries[index];
+                key_cache_entry.value = Some(value);
+                key_cache_entry.compressed = Some(&compressed);
+                self.cache.put_key(key_cache_entry);
 
                 Ok(Some(Entry {
                     timestamp: *timestamp,
@@ -142,7 +150,7 @@ impl Levels {
                 let entries = self
                     .ctx
                     .fn_registry
-                    .decompress_entries(&time_key.1, raw_bytes);
+                    .decompress_entries(&time_key.1, &raw_bytes);
 
                 let index = match entries
                     .binary_search_by_key(&time_key.0, |(ts, _)| *ts)
@@ -152,6 +160,10 @@ impl Levels {
                     None => return Ok(None),
                 };
                 let (timestamp, value) = &entries[index];
+
+                key_cache_entry.value = Some(value);
+                key_cache_entry.compressed = Some(&raw_bytes);
+                self.cache.put_key(key_cache_entry);
 
                 Ok(Some(Entry {
                     timestamp: *timestamp,
@@ -180,9 +192,16 @@ impl Levels {
                     handle
                 };
 
-                handle.get(time_key).await
+                let entry = handle.get(time_key).await?;
+                if let Some(entry) = &entry {
+                    key_cache_entry.value = Some(&entry.value);
+                    self.cache.put_key(key_cache_entry);
+                }
+                Ok(entry)
             }
-        }
+        };
+
+        entry
     }
 
     async fn handle_actions(&mut self, actions: Vec<TimestampAction>) -> Result<()> {
