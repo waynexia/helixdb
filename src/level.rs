@@ -3,10 +3,10 @@ use std::convert::TryFrom;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-use crate::cache::{Cache, CacheConfig};
+use crate::cache::{Cache, CacheConfig, KeyCacheResult};
 use crate::context::Context;
 use crate::error::Result;
-use crate::file::{Rick, SSTable, TableBuilder, ValueLogBuilder};
+use crate::file::{Rick, SSTable, TableBuilder, VLog, ValueLogBuilder};
 use crate::index::MemIndex;
 use crate::types::{Bytes, Entry, LevelId, LevelInfo, ThreadId, Timestamp};
 
@@ -44,9 +44,7 @@ impl Levels {
         let rick = Rick::from(ctx.file_manager.open_rick(tid).await?);
         let level_info = ctx.file_manager.open_level_info().await?;
 
-        let cache = Cache::new(CacheConfig {
-            table_handle_size: 8,
-        });
+        let cache = Cache::new(CacheConfig::default());
 
         Ok(Self {
             tid,
@@ -110,26 +108,81 @@ impl Levels {
         time_key: &(Timestamp, Bytes),
         level_id: LevelId,
     ) -> Result<Option<Entry>> {
-        let handle = if let Some(handle) = self.cache.get_table_handle(&(self.tid, level_id).into())
-        {
-            handle
-        } else {
-            let table_file = self
-                .ctx
-                .file_manager
-                .open_sstable(self.tid, level_id)
-                .await?;
-            let handle = SSTable::new(table_file, self.tid, level_id)
-                .handle(self.ctx.clone())
-                .await?;
+        match self.cache.get_key(time_key) {
+            KeyCacheResult::Value(value) => Ok(Some(Entry {
+                timestamp: time_key.0,
+                key: time_key.1.to_owned(),
+                value,
+            })),
+            KeyCacheResult::Compressed(compressed) => {
+                let entries = self
+                    .ctx
+                    .fn_registry
+                    .decompress_entries(&time_key.1, compressed);
 
-            let handle = Rc::new(handle);
-            self.cache
-                .put_table_handle((self.tid, level_id).into(), handle.clone());
-            handle
-        };
+                let index = match entries
+                    .binary_search_by_key(&time_key.0, |(ts, _)| *ts)
+                    .ok()
+                {
+                    Some(thing) => thing,
+                    None => return Ok(None),
+                };
+                let (timestamp, value) = &entries[index];
 
-        handle.get(time_key).await
+                Ok(Some(Entry {
+                    timestamp: *timestamp,
+                    key: time_key.1.clone(),
+                    value: value.clone(),
+                }))
+            }
+            KeyCacheResult::Position(tid, level_id, offset, size) => {
+                let vlog = VLog::from(self.ctx.file_manager.open_vlog(tid, level_id).await?);
+                let raw_bytes = vlog.get(offset as u64, size as u64).await?;
+
+                let entries = self
+                    .ctx
+                    .fn_registry
+                    .decompress_entries(&time_key.1, raw_bytes);
+
+                let index = match entries
+                    .binary_search_by_key(&time_key.0, |(ts, _)| *ts)
+                    .ok()
+                {
+                    Some(thing) => thing,
+                    None => return Ok(None),
+                };
+                let (timestamp, value) = &entries[index];
+
+                Ok(Some(Entry {
+                    timestamp: *timestamp,
+                    key: time_key.1.clone(),
+                    value: value.clone(),
+                }))
+            }
+            KeyCacheResult::NotFound => {
+                let handle = if let Some(handle) =
+                    self.cache.get_table_handle(&(self.tid, level_id).into())
+                {
+                    handle
+                } else {
+                    let table_file = self
+                        .ctx
+                        .file_manager
+                        .open_sstable(self.tid, level_id)
+                        .await?;
+                    let handle = SSTable::new(table_file, self.tid, level_id)
+                        .handle(self.ctx.clone())
+                        .await?;
+
+                    let handle = Rc::new(handle);
+                    self.cache
+                        .put_table_handle((self.tid, level_id).into(), handle.clone());
+                    handle
+                };
+
+                handle.get(time_key).await
+            }
+        }
     }
 
     async fn handle_actions(&mut self, actions: Vec<TimestampAction>) -> Result<()> {

@@ -18,6 +18,7 @@ pub type DecompressFn = Arc<dyn Fn(Bytes, Bytes) -> Vec<(Timestamp, Bytes)> + Se
 /// `UDCF` stands for "User Defined Compress Function".
 /// Includes compress and decompress implementation.
 #[derive(Clone)]
+#[allow(clippy::upper_case_acronyms)]
 pub struct UDCF {
     name: String,
     compress_fn: CompressFn,
@@ -92,6 +93,10 @@ impl FnRegistry {
             .get(name)
             .cloned()
             .ok_or(HelixError::NotFound)
+    }
+
+    pub fn decompress_entries(&self, key: &Bytes, data: Bytes) -> Vec<(Timestamp, Bytes)> {
+        todo!()
     }
 }
 
