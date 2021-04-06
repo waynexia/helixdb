@@ -311,7 +311,7 @@ pub enum TimestampAction {
 /// compaction and outdate only based on this. In real scenario
 /// when timestamp has more meaning or restriction, more complex logic can
 /// be achieved.
-struct SimpleTimestampReviewer {
+pub struct SimpleTimestampReviewer {
     // config part
     rick_range: Timestamp,
     outdate_range: Timestamp,

@@ -8,6 +8,7 @@ use crate::types::{Bytes, Entry, ThreadId, Timestamp};
 /// A un-Send handle to accept and process requests.
 pub struct IOWorker {
     levels: Levels,
+    // todo: add channel mesh
 }
 
 impl IOWorker {
@@ -22,10 +23,10 @@ impl IOWorker {
     }
 
     pub async fn put(&mut self, entries: Vec<Entry>) -> Result<()> {
-        todo!()
+        self.levels.put(entries).await
     }
 
     pub async fn get(&mut self, time_key: &(Timestamp, Bytes)) -> Result<Option<Entry>> {
-        todo!()
+        self.levels.get(time_key).await
     }
 }

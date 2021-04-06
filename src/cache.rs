@@ -51,7 +51,14 @@ pub struct Cache {
 
 impl Cache {
     pub fn new(config: CacheConfig) -> Self {
-        todo!()
+        Self {
+            handle_cache: RefCell::new(LruCache::new(config.table_handle_size)),
+            kv_cache: RefCell::new(LruCache::new(config.kv_cache_size)),
+            kc_cache: RefCell::new(LruCache::new(config.kc_cache_size)),
+            kp_cache: RefCell::new(LruCache::new(config.kp_cache_size)),
+
+            config,
+        }
     }
 
     pub fn get_table_handle(&self, table_id: &TableIdentifier) -> Option<Rc<SSTableHandle>> {

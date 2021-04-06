@@ -61,7 +61,7 @@ pub struct FnRegistry {
 }
 
 impl FnRegistry {
-    #[cfg(test)]
+    // #[cfg(test)]
     pub fn new_noop() -> Self {
         let mut compress_functions = HashMap::new();
         compress_functions.insert("noop".to_string(), noop_udcf());
