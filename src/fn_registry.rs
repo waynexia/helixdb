@@ -88,6 +88,10 @@ impl FnRegistry {
         self.dispatch_fn.clone()
     }
 
+    pub fn sharding_fn(&self) -> &ShardingKeyFn {
+        &self.sharding_key_fn
+    }
+
     pub fn udcf(&self, name: &str) -> Result<UDCF> {
         self.compress_functions
             .get(name)

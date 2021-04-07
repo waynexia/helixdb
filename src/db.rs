@@ -1,7 +1,8 @@
-use glommio::{channels::channel_mesh::MeshBuilder, Local};
-use glommio::{enclose, LocalExecutorBuilder};
+use futures_util::future::try_join_all;
+use glommio::LocalExecutorBuilder;
+use std::collections::HashMap;
 use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
 use crate::context::Context;
@@ -12,14 +13,11 @@ use crate::io_worker::IOWorker;
 use crate::level::SimpleTimestampReviewer;
 use crate::types::{Bytes, Entry};
 
-const DEFAULT_TICK_ORDER: Ordering = Ordering::Relaxed;
 /// Size of channels that used to do IPC between shards.
 const CHANNEL_MESH_SIZE: usize = 128;
 
 pub struct HelixDB {
     core: Arc<HelixCore>,
-    tick: Arc<AtomicUsize>,
-    num_workers: usize,
 }
 
 impl HelixDB {
@@ -28,19 +26,28 @@ impl HelixDB {
 
         Self {
             core: Arc::new(core),
-            tick: Arc::new(AtomicUsize::new(0)),
-            num_workers,
         }
     }
 
     pub async fn put(&self, write_batch: Vec<Entry>) -> Result<()> {
-        let tick = self.tick.fetch_add(1, DEFAULT_TICK_ORDER) % self.num_workers;
-        self.core.put_unchecked(tick, write_batch).await
+        self.core.sharding_put(write_batch).await
+    }
+
+    pub async fn direct_put(&self, shard_id: usize, write_batch: Vec<Entry>) -> Result<()> {
+        self.core.put_unchecked(shard_id, write_batch).await
     }
 
     pub async fn get(&self, timestamp: i64, key: Bytes) -> Result<Option<Entry>> {
-        let tick = self.tick.fetch_add(1, DEFAULT_TICK_ORDER) % self.num_workers;
-        self.core.get_unchecked(tick, timestamp, key).await
+        self.core.sharding_get(timestamp, key).await
+    }
+
+    pub async fn direct_get(
+        &self,
+        shard_id: usize,
+        timestamp: i64,
+        key: Bytes,
+    ) -> Result<Option<Entry>> {
+        self.core.get_unchecked(shard_id, timestamp, key).await
     }
 
     pub async fn scan(&self) {
@@ -51,6 +58,7 @@ impl HelixDB {
 struct HelixCore {
     // todo: remove lock
     workers: Vec<Mutex<IOWorker>>,
+    ctx: Arc<Context>,
 }
 
 impl HelixCore {
@@ -58,12 +66,41 @@ impl HelixCore {
         todo!()
     }
 
-    /// `worker` should be a valid value
+    /// Dispatch entries in write batch to corresponding shards.
+    async fn sharding_put(&self, write_batch: Vec<Entry>) -> Result<()> {
+        let mut tasks = HashMap::<usize, Vec<_>>::new();
+
+        for entry in write_batch {
+            let shard_id = self.ctx.fn_registry.sharding_fn()(&entry.key);
+            tasks.entry(shard_id).or_default().push(entry);
+        }
+
+        let mut handles = Vec::with_capacity(tasks.len());
+        for (shard_id, write_batch) in tasks {
+            handles.push(self.workers[shard_id].lock().unwrap().put(write_batch));
+        }
+
+        try_join_all(handles).await?;
+
+        Ok(())
+    }
+
+    /// Put on specified shard without routing.
     async fn put_unchecked(&self, worker: usize, write_batch: Vec<Entry>) -> Result<()> {
         self.workers[worker].lock().unwrap().put(write_batch).await
     }
 
-    /// `worker` should be a valid value
+    async fn sharding_get(&self, timestamp: i64, key: Bytes) -> Result<Option<Entry>> {
+        let shard_id = self.ctx.fn_registry.sharding_fn()(&key);
+
+        self.workers[shard_id]
+            .lock()
+            .unwrap()
+            .get(&(timestamp, key))
+            .await
+    }
+
+    /// Get on specified shard without routing.
     async fn get_unchecked(
         &self,
         worker: usize,
@@ -99,7 +136,7 @@ impl HelixCore {
             workers.push(Mutex::new(worker));
         }
 
-        Self { workers }
+        Self { workers, ctx }
     }
 }
 
@@ -114,15 +151,14 @@ mod test {
         let base_dir = tempdir().unwrap();
         let db = HelixDB::new(base_dir.path(), 4);
 
-        db.put(vec![Entry {
+        let entry = Entry {
             timestamp: 0,
             key: b"key".to_vec(),
             value: b"value".to_vec(),
-        }])
-        .await
-        .unwrap();
+        };
+        db.put(vec![entry.clone()]).await.unwrap();
 
-        let value = db.get(0, b"key".to_vec()).await.unwrap();
-        println!("{:?}", value);
+        let result = db.get(0, b"key".to_vec()).await.unwrap();
+        assert_eq!(result.unwrap(), entry);
     }
 }

@@ -10,7 +10,6 @@ use crate::types::{Bytes, Entry, ThreadId, Timestamp};
 /// A un-Send handle to accept and process requests.
 pub struct IOWorker {
     tid: ThreadId,
-    ctx: Arc<Context>,
     levels: Levels,
     // todo: add channel mesh
     executor: LocalExecutor,
@@ -23,11 +22,10 @@ impl IOWorker {
         ctx: Arc<Context>,
         executor: LocalExecutor,
     ) -> Result<Self> {
-        let levels = executor.run(Levels::try_new(tid, timestamp_reviewer, ctx.clone()))?;
+        let levels = executor.run(Levels::try_new(tid, timestamp_reviewer, ctx))?;
 
         Ok(Self {
             tid,
-            ctx,
             levels,
             executor,
         })
