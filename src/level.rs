@@ -123,7 +123,7 @@ impl Levels {
                 let entries = self
                     .ctx
                     .fn_registry
-                    .decompress_entries(&time_key.1, &compressed);
+                    .decompress_entries(&time_key.1, &compressed)?;
 
                 let index = match entries
                     .binary_search_by_key(&time_key.0, |(ts, _)| *ts)
@@ -150,7 +150,7 @@ impl Levels {
                 let entries = self
                     .ctx
                     .fn_registry
-                    .decompress_entries(&time_key.1, &raw_bytes);
+                    .decompress_entries(&time_key.1, &raw_bytes)?;
 
                 let index = match entries
                     .binary_search_by_key(&time_key.0, |(ts, _)| *ts)

@@ -204,7 +204,7 @@ impl SSTableHandle {
             None => return Ok(None),
         };
         let raw_bytes = self.vlog.get(offset, size).await?;
-        let entries = self.ctx.fn_registry.decompress_entries(key, &raw_bytes);
+        let entries = self.ctx.fn_registry.decompress_entries(key, &raw_bytes)?;
 
         let index = match entries.binary_search_by_key(&ts, |(ts, _)| ts).ok() {
             Some(thing) => thing,
