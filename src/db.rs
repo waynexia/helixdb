@@ -1,3 +1,5 @@
+use glommio::{channels::channel_mesh::MeshBuilder, Local};
+use glommio::{enclose, LocalExecutorBuilder};
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -11,6 +13,8 @@ use crate::level::SimpleTimestampReviewer;
 use crate::types::{Bytes, Entry};
 
 const DEFAULT_TICK_ORDER: Ordering = Ordering::Relaxed;
+/// Size of channels that used to do IPC between shards.
+const CHANNEL_MESH_SIZE: usize = 128;
 
 pub struct HelixDB {
     core: Arc<HelixCore>,
@@ -19,8 +23,8 @@ pub struct HelixDB {
 }
 
 impl HelixDB {
-    pub async fn new<P: AsRef<Path>>(base_dir: P, num_workers: usize) -> Self {
-        let core = HelixCore::default(base_dir, num_workers).await;
+    pub fn new<P: AsRef<Path>>(base_dir: P, num_workers: usize) -> Self {
+        let core = HelixCore::default(base_dir, num_workers);
 
         Self {
             core: Arc::new(core),
@@ -74,7 +78,7 @@ impl HelixCore {
     }
 
     // todo: remove this, finish Config
-    async fn default<P: AsRef<Path>>(base_dir: P, num_workers: usize) -> Self {
+    fn default<P: AsRef<Path>>(base_dir: P, num_workers: usize) -> Self {
         let file_manager = FileManager::with_base_dir(base_dir).unwrap();
         let fn_registry = FnRegistry::new_noop();
         let ctx = Arc::new(Context {
@@ -83,11 +87,15 @@ impl HelixCore {
         });
         let timestamp_reviewer = Arc::new(Mutex::new(SimpleTimestampReviewer::new(10, 30)));
 
+        // let mesh_builder = MeshBuilder::full(num_workers, CHANNEL_MESH_SIZE);
         let mut workers = Vec::with_capacity(num_workers);
         for tid in 0..num_workers as u64 {
-            let worker = IOWorker::try_new(tid, timestamp_reviewer.clone(), ctx.clone())
-                .await
+            let executor = LocalExecutorBuilder::new()
+                .pin_to_cpu(tid as usize)
+                .make()
                 .unwrap();
+            let worker =
+                IOWorker::try_new(tid, timestamp_reviewer.clone(), ctx.clone(), executor).unwrap();
             workers.push(Mutex::new(worker));
         }
 
@@ -99,28 +107,22 @@ impl HelixCore {
 mod test {
     use super::*;
 
-    use glommio::LocalExecutor;
     use tempfile::tempdir;
 
-    #[test]
-    fn basic() {
+    #[tokio::test]
+    async fn example() {
         let base_dir = tempdir().unwrap();
-        let ex = LocalExecutor::default();
+        let db = HelixDB::new(base_dir.path(), 4);
 
-        ex.run(async {
-            let db = HelixDB::new(base_dir.path(), 4).await;
-            for _ in 0..10 {
-                db.put(vec![Entry {
-                    timestamp: 0,
-                    key: b"key".to_vec(),
-                    value: b"value".to_vec(),
-                }])
-                .await
-                .unwrap();
-            }
+        db.put(vec![Entry {
+            timestamp: 0,
+            key: b"key".to_vec(),
+            value: b"value".to_vec(),
+        }])
+        .await
+        .unwrap();
 
-            let value = db.get(0, b"key".to_vec()).await.unwrap();
-            println!("{:?}", value);
-        })
+        let value = db.get(0, b"key".to_vec()).await.unwrap();
+        println!("{:?}", value);
     }
 }
