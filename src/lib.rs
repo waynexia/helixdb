@@ -21,3 +21,4 @@ mod table;
 mod types;
 
 pub use db::*;
+pub use types::Entry;

@@ -1,8 +1,6 @@
-use futures_util::future::try_join_all;
 use glommio::LocalExecutorBuilder;
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
 use crate::context::Context;
@@ -16,6 +14,7 @@ use crate::types::{Bytes, Entry};
 /// Size of channels that used to do IPC between shards.
 const CHANNEL_MESH_SIZE: usize = 128;
 
+#[derive(Clone)]
 pub struct HelixDB {
     core: Arc<HelixCore>,
 }
@@ -29,31 +28,29 @@ impl HelixDB {
         }
     }
 
-    pub async fn put(&self, write_batch: Vec<Entry>) -> Result<()> {
-        self.core.sharding_put(write_batch).await
+    pub fn put(&self, write_batch: Vec<Entry>) -> Result<()> {
+        self.core.sharding_put(write_batch)
     }
 
-    pub async fn direct_put(&self, shard_id: usize, write_batch: Vec<Entry>) -> Result<()> {
-        self.core.put_unchecked(shard_id, write_batch).await
+    pub fn direct_put(&self, shard_id: usize, write_batch: Vec<Entry>) -> Result<()> {
+        self.core.put_unchecked(shard_id, write_batch)
     }
 
-    pub async fn get(&self, timestamp: i64, key: Bytes) -> Result<Option<Entry>> {
-        self.core.sharding_get(timestamp, key).await
+    pub fn get(&self, timestamp: i64, key: Bytes) -> Result<Option<Entry>> {
+        self.core.sharding_get(timestamp, key)
     }
 
-    pub async fn direct_get(
-        &self,
-        shard_id: usize,
-        timestamp: i64,
-        key: Bytes,
-    ) -> Result<Option<Entry>> {
-        self.core.get_unchecked(shard_id, timestamp, key).await
+    pub fn direct_get(&self, shard_id: usize, timestamp: i64, key: Bytes) -> Result<Option<Entry>> {
+        self.core.get_unchecked(shard_id, timestamp, key)
     }
 
     pub async fn scan(&self) {
         todo!()
     }
 }
+
+unsafe impl Send for HelixDB {}
+unsafe impl Sync for HelixDB {}
 
 struct HelixCore {
     // todo: remove lock
@@ -67,7 +64,7 @@ impl HelixCore {
     }
 
     /// Dispatch entries in write batch to corresponding shards.
-    async fn sharding_put(&self, write_batch: Vec<Entry>) -> Result<()> {
+    fn sharding_put(&self, write_batch: Vec<Entry>) -> Result<()> {
         let mut tasks = HashMap::<usize, Vec<_>>::new();
 
         for entry in write_batch {
@@ -75,43 +72,30 @@ impl HelixCore {
             tasks.entry(shard_id).or_default().push(entry);
         }
 
-        let mut handles = Vec::with_capacity(tasks.len());
         for (shard_id, write_batch) in tasks {
-            handles.push(self.workers[shard_id].lock().unwrap().put(write_batch));
+            self.put_unchecked(shard_id, write_batch)?;
         }
-
-        try_join_all(handles).await?;
 
         Ok(())
     }
 
     /// Put on specified shard without routing.
-    async fn put_unchecked(&self, worker: usize, write_batch: Vec<Entry>) -> Result<()> {
-        self.workers[worker].lock().unwrap().put(write_batch).await
+    fn put_unchecked(&self, worker: usize, write_batch: Vec<Entry>) -> Result<()> {
+        self.workers[worker].lock().unwrap().put(write_batch)
     }
 
-    async fn sharding_get(&self, timestamp: i64, key: Bytes) -> Result<Option<Entry>> {
+    fn sharding_get(&self, timestamp: i64, key: Bytes) -> Result<Option<Entry>> {
         let shard_id = self.ctx.fn_registry.sharding_fn()(&key);
 
         self.workers[shard_id]
             .lock()
             .unwrap()
             .get(&(timestamp, key))
-            .await
     }
 
     /// Get on specified shard without routing.
-    async fn get_unchecked(
-        &self,
-        worker: usize,
-        timestamp: i64,
-        key: Bytes,
-    ) -> Result<Option<Entry>> {
-        self.workers[worker]
-            .lock()
-            .unwrap()
-            .get(&(timestamp, key))
-            .await
+    fn get_unchecked(&self, worker: usize, timestamp: i64, key: Bytes) -> Result<Option<Entry>> {
+        self.workers[worker].lock().unwrap().get(&(timestamp, key))
     }
 
     // todo: remove this, finish Config
@@ -146,19 +130,19 @@ mod test {
 
     use tempfile::tempdir;
 
-    #[tokio::test]
-    async fn example() {
+    #[test]
+    fn example() {
         let base_dir = tempdir().unwrap();
-        let db = HelixDB::new(base_dir.path(), 4);
+        let db = HelixDB::new(base_dir.path(), 9);
 
         let entry = Entry {
             timestamp: 0,
             key: b"key".to_vec(),
             value: b"value".to_vec(),
         };
-        db.put(vec![entry.clone()]).await.unwrap();
+        db.put(vec![entry.clone()]).unwrap();
 
-        let result = db.get(0, b"key".to_vec()).await.unwrap();
+        let result = db.get(0, b"key".to_vec()).unwrap();
         assert_eq!(result.unwrap(), entry);
     }
 }

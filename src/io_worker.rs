@@ -31,18 +31,11 @@ impl IOWorker {
         })
     }
 
-    pub fn put(&mut self, entries: Vec<Entry>) -> impl Future<Output = Result<()>> {
-        let result = self.executor.run(self.levels.put(entries));
-
-        async move { result }
+    pub fn put(&mut self, entries: Vec<Entry>) -> Result<()> {
+        self.executor.run(self.levels.put(entries))
     }
 
-    pub fn get(
-        &mut self,
-        time_key: &(Timestamp, Bytes),
-    ) -> impl Future<Output = Result<Option<Entry>>> {
-        let result = self.executor.run(self.levels.get(time_key));
-
-        async move { result }
+    pub fn get(&mut self, time_key: &(Timestamp, Bytes)) -> Result<Option<Entry>> {
+        self.executor.run(self.levels.get(time_key))
     }
 }
