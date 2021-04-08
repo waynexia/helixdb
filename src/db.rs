@@ -8,7 +8,8 @@ use crate::error::Result;
 use crate::file::FileManager;
 use crate::fn_registry::FnRegistry;
 use crate::io_worker::IOWorker;
-use crate::level::SimpleTimestampReviewer;
+use crate::level::{SimpleTimestampReviewer, TimestampReviewer};
+use crate::option::Options;
 use crate::types::{Bytes, Entry};
 
 /// Size of channels that used to do IPC between shards.
@@ -20,12 +21,16 @@ pub struct HelixDB {
 }
 
 impl HelixDB {
-    pub fn new<P: AsRef<Path>>(base_dir: P, num_workers: usize) -> Self {
-        let core = HelixCore::default(base_dir, num_workers);
-
+    pub fn open<P: AsRef<Path>>(path: P, opts: Options) -> Self {
         Self {
-            core: Arc::new(core),
+            core: Arc::new(HelixCore::new(path, opts)),
         }
+    }
+
+    /// Open HelixDB with default [Options]
+    pub fn open_default<P: AsRef<Path>>(path: P) -> Self {
+        let opts = Options::default();
+        Self::open(path, opts)
     }
 
     pub fn put(&self, write_batch: Vec<Entry>) -> Result<()> {
@@ -59,8 +64,25 @@ struct HelixCore {
 }
 
 impl HelixCore {
-    fn new() -> Self {
-        todo!()
+    fn new<P: AsRef<Path>>(path: P, opts: Options) -> Self {
+        let file_manager = FileManager::with_base_dir(path).unwrap();
+        let ctx = Arc::new(Context {
+            file_manager,
+            fn_registry: opts.fn_registry,
+        });
+        let tsr = Arc::new(Mutex::new(opts.tsr));
+
+        let mut workers = Vec::with_capacity(opts.num_shard);
+        for tid in 0..opts.num_shard as u64 {
+            let executor = LocalExecutorBuilder::new()
+                .pin_to_cpu(tid as usize)
+                .make()
+                .unwrap();
+            let worker = IOWorker::try_new(tid, tsr.clone(), ctx.clone(), executor).unwrap();
+            workers.push(Mutex::new(worker));
+        }
+
+        Self { workers, ctx }
     }
 
     /// Dispatch entries in write batch to corresponding shards.
@@ -97,31 +119,6 @@ impl HelixCore {
     fn get_unchecked(&self, worker: usize, timestamp: i64, key: Bytes) -> Result<Option<Entry>> {
         self.workers[worker].lock().unwrap().get(&(timestamp, key))
     }
-
-    // todo: remove this, finish Config
-    fn default<P: AsRef<Path>>(base_dir: P, num_workers: usize) -> Self {
-        let file_manager = FileManager::with_base_dir(base_dir).unwrap();
-        let fn_registry = FnRegistry::new_noop();
-        let ctx = Arc::new(Context {
-            file_manager,
-            fn_registry,
-        });
-        let timestamp_reviewer = Arc::new(Mutex::new(SimpleTimestampReviewer::new(10, 30)));
-
-        // let mesh_builder = MeshBuilder::full(num_workers, CHANNEL_MESH_SIZE);
-        let mut workers = Vec::with_capacity(num_workers);
-        for tid in 0..num_workers as u64 {
-            let executor = LocalExecutorBuilder::new()
-                .pin_to_cpu(tid as usize)
-                .make()
-                .unwrap();
-            let worker =
-                IOWorker::try_new(tid, timestamp_reviewer.clone(), ctx.clone(), executor).unwrap();
-            workers.push(Mutex::new(worker));
-        }
-
-        Self { workers, ctx }
-    }
 }
 
 #[cfg(test)]
@@ -133,7 +130,7 @@ mod test {
     #[test]
     fn example() {
         let base_dir = tempdir().unwrap();
-        let db = HelixDB::new(base_dir.path(), 9);
+        let db = HelixDB::open_default(base_dir.path());
 
         let entry = Entry {
             timestamp: 0,

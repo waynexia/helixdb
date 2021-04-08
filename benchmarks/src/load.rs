@@ -1,7 +1,9 @@
-use helixdb::{Entry, HelixDB};
+use helixdb::option::Options;
+use helixdb::{Entry, FnRegistry, HelixDB, SimpleTimestampReviewer};
 use indicatif::ProgressBar;
+use std::convert::TryInto;
 use std::path::Path;
-use std::sync::mpsc::channel;
+use std::sync::Arc;
 use tokio::runtime::Builder;
 
 fn generate_entry(timestamp: i64, key: u64, value_size: usize) -> Entry {
@@ -16,14 +18,29 @@ fn generate_entry(timestamp: i64, key: u64, value_size: usize) -> Entry {
     }
 }
 
+fn open_db<P: AsRef<Path>>(path: P, num_shard: usize) -> HelixDB {
+    let simple_tsr = SimpleTimestampReviewer::new(1024, 8192);
+    let mut fn_registry = FnRegistry::new_noop();
+    fn_registry.register_sharding_key_fn(Arc::new(move |key| {
+        u64::from_le_bytes(key.to_owned().try_into().unwrap()) as usize % num_shard
+    }));
+
+    let opts = Options::default()
+        .shards(num_shard)
+        .set_timestamp_reviewer(Box::new(simple_tsr))
+        .set_fn_registry(fn_registry);
+
+    HelixDB::open(path, opts)
+}
+
 pub fn load<P: AsRef<Path>>(
-    dir: P,
+    path: P,
     num_shard: usize,
     num_thread: usize,
     num_entry: usize,
     value_size: usize,
 ) {
-    let helixdb = HelixDB::new(dir, num_shard);
+    let helixdb = open_db(path, num_shard);
     // let (tx, rx) = channel();
 
     let bar = ProgressBar::new(num_entry as u64);

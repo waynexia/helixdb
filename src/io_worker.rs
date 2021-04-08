@@ -18,7 +18,7 @@ pub struct IOWorker {
 impl IOWorker {
     pub fn try_new(
         tid: ThreadId,
-        timestamp_reviewer: Arc<Mutex<dyn TimestampReviewer>>,
+        timestamp_reviewer: Arc<Mutex<Box<dyn TimestampReviewer + 'static>>>,
         ctx: Arc<Context>,
         executor: LocalExecutor,
     ) -> Result<Self> {

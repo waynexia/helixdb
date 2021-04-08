@@ -27,7 +27,7 @@ pub struct LevelConfig {
 pub struct Levels {
     tid: ThreadId,
     // todo: remove this mutex
-    timestamp_reviewer: Arc<Mutex<dyn TimestampReviewer>>,
+    timestamp_reviewer: Arc<Mutex<Box<dyn TimestampReviewer>>>,
     ctx: Arc<Context>,
     memindex: MemIndex,
     rick: Rick,
@@ -38,7 +38,7 @@ pub struct Levels {
 impl Levels {
     pub async fn try_new(
         tid: ThreadId,
-        timestamp_reviewer: Arc<Mutex<dyn TimestampReviewer>>,
+        timestamp_reviewer: Arc<Mutex<Box<dyn TimestampReviewer>>>,
         ctx: Arc<Context>,
     ) -> Result<Self> {
         let rick = Rick::from(ctx.file_manager.open_rick(tid).await?);
@@ -391,7 +391,8 @@ mod test {
                 file_manager,
                 fn_registry,
             });
-            let timestamp_reviewer = Arc::new(Mutex::new(SimpleTimestampReviewer::new(10, 30)));
+            let timestamp_reviewer: Arc<Mutex<Box<dyn TimestampReviewer>>> =
+                Arc::new(Mutex::new(Box::new(SimpleTimestampReviewer::new(10, 30))));
             let mut levels = Levels::try_new(1, timestamp_reviewer, ctx).await.unwrap();
 
             let entries = vec![
@@ -430,7 +431,8 @@ mod test {
                 file_manager,
                 fn_registry,
             });
-            let timestamp_reviewer = Arc::new(Mutex::new(SimpleTimestampReviewer::new(10, 30)));
+            let timestamp_reviewer: Arc<Mutex<Box<dyn TimestampReviewer>>> =
+                Arc::new(Mutex::new(Box::new(SimpleTimestampReviewer::new(10, 30))));
             let mut levels = Levels::try_new(1, timestamp_reviewer, ctx.clone())
                 .await
                 .unwrap();
