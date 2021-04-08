@@ -9,7 +9,7 @@ thiserror = "1.0"
 protos = { path = "protos" }
 flatbuffers = "0.7.0"
 io-uring = "0.5.0"
-tokio = { version = "1.0", features = ["full"] }
+tokio = { version = "1.4", features = ["full"] }
 glommio = "0.3"
 async-trait = "0.1.48"
 lru = "0.6"
