@@ -1,14 +1,17 @@
+use futures_util::future::try_join_all;
 use glommio::LocalExecutorBuilder;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
+// use tokio::sync::mpsc::{channel as bounded_channel, Sender};
+use crossbeam_channel::{bounded, Sender};
+use tokio::sync::oneshot::channel as oneshot;
 
 use crate::context::Context;
 use crate::error::Result;
 use crate::file::FileManager;
-use crate::fn_registry::FnRegistry;
-use crate::io_worker::IOWorker;
-use crate::level::{SimpleTimestampReviewer, TimestampReviewer};
+use crate::io_worker::{IOWorker, Task};
 use crate::option::Options;
 use crate::types::{Bytes, Entry};
 
@@ -33,20 +36,25 @@ impl HelixDB {
         Self::open(path, opts)
     }
 
-    pub fn put(&self, write_batch: Vec<Entry>) -> Result<()> {
-        self.core.sharding_put(write_batch)
+    pub async fn put(&self, write_batch: Vec<Entry>) -> Result<()> {
+        self.core.sharding_put(write_batch).await
     }
 
-    pub fn direct_put(&self, shard_id: usize, write_batch: Vec<Entry>) -> Result<()> {
-        self.core.put_unchecked(shard_id, write_batch)
+    pub async fn direct_put(&self, shard_id: usize, write_batch: Vec<Entry>) -> Result<()> {
+        self.core.put_unchecked(shard_id, write_batch).await
     }
 
-    pub fn get(&self, timestamp: i64, key: Bytes) -> Result<Option<Entry>> {
-        self.core.sharding_get(timestamp, key)
+    pub async fn get(&self, timestamp: i64, key: Bytes) -> Result<Option<Entry>> {
+        self.core.sharding_get(timestamp, key).await
     }
 
-    pub fn direct_get(&self, shard_id: usize, timestamp: i64, key: Bytes) -> Result<Option<Entry>> {
-        self.core.get_unchecked(shard_id, timestamp, key)
+    pub async fn direct_get(
+        &self,
+        shard_id: usize,
+        timestamp: i64,
+        key: Bytes,
+    ) -> Result<Option<Entry>> {
+        self.core.get_unchecked(shard_id, timestamp, key).await
     }
 
     pub async fn scan(&self) {
@@ -59,7 +67,9 @@ unsafe impl Sync for HelixDB {}
 
 struct HelixCore {
     // todo: remove lock
-    workers: Vec<Mutex<IOWorker>>,
+    /// Join handles of shards' working threads.
+    worker_handle: Vec<JoinHandle<()>>,
+    task_txs: Vec<Sender<Task>>,
     ctx: Arc<Context>,
 }
 
@@ -72,21 +82,34 @@ impl HelixCore {
         });
         let tsr = Arc::new(Mutex::new(opts.tsr));
 
-        let mut workers = Vec::with_capacity(opts.num_shard);
+        let mut worker_handle = Vec::with_capacity(opts.num_shard);
+        let mut task_txs = Vec::with_capacity(opts.num_shard);
         for tid in 0..opts.num_shard as u64 {
-            let executor = LocalExecutorBuilder::new()
+            let tsr = tsr.clone();
+            let ctx = ctx.clone();
+            let (tx, rx) = bounded(opts.task_buffer_size);
+
+            let handle = LocalExecutorBuilder::new()
                 .pin_to_cpu(tid as usize)
-                .make()
+                .spawn(move || async move {
+                    let worker = IOWorker::try_new(tid, tsr, ctx).await.unwrap();
+                    worker.run(rx).await
+                })
                 .unwrap();
-            let worker = IOWorker::try_new(tid, tsr.clone(), ctx.clone(), executor).unwrap();
-            workers.push(Mutex::new(worker));
+
+            worker_handle.push(handle);
+            task_txs.push(tx);
         }
 
-        Self { workers, ctx }
+        Self {
+            worker_handle,
+            task_txs,
+            ctx,
+        }
     }
 
     /// Dispatch entries in write batch to corresponding shards.
-    fn sharding_put(&self, write_batch: Vec<Entry>) -> Result<()> {
+    async fn sharding_put(&self, write_batch: Vec<Entry>) -> Result<()> {
         let mut tasks = HashMap::<usize, Vec<_>>::new();
 
         for entry in write_batch {
@@ -94,30 +117,55 @@ impl HelixCore {
             tasks.entry(shard_id).or_default().push(entry);
         }
 
+        let mut futures = Vec::with_capacity(tasks.len());
         for (shard_id, write_batch) in tasks {
-            self.put_unchecked(shard_id, write_batch)?;
+            futures.push(self.put_unchecked(shard_id, write_batch));
         }
 
+        try_join_all(futures).await?;
         Ok(())
     }
 
     /// Put on specified shard without routing.
-    fn put_unchecked(&self, worker: usize, write_batch: Vec<Entry>) -> Result<()> {
-        self.workers[worker].lock().unwrap().put(write_batch)
+    async fn put_unchecked(&self, worker: usize, write_batch: Vec<Entry>) -> Result<()> {
+        let (tx, rx) = oneshot();
+        let task = Task::Put(write_batch, tx);
+
+        self.task_txs[worker].send(task)?;
+
+        rx.await?
     }
 
-    fn sharding_get(&self, timestamp: i64, key: Bytes) -> Result<Option<Entry>> {
+    async fn sharding_get(&self, timestamp: i64, key: Bytes) -> Result<Option<Entry>> {
         let shard_id = self.ctx.fn_registry.sharding_fn()(&key);
-
-        self.workers[shard_id]
-            .lock()
-            .unwrap()
-            .get(&(timestamp, key))
+        self.get_unchecked(shard_id, timestamp, key).await
     }
 
     /// Get on specified shard without routing.
-    fn get_unchecked(&self, worker: usize, timestamp: i64, key: Bytes) -> Result<Option<Entry>> {
-        self.workers[worker].lock().unwrap().get(&(timestamp, key))
+    async fn get_unchecked(
+        &self,
+        worker: usize,
+        timestamp: i64,
+        key: Bytes,
+    ) -> Result<Option<Entry>> {
+        let (tx, rx) = oneshot();
+        let task = Task::Get(timestamp, key, tx);
+
+        self.task_txs[worker].send(task)?;
+
+        rx.await?
+    }
+}
+
+impl Drop for HelixCore {
+    fn drop(&mut self) {
+        for tx in &self.task_txs {
+            let _ = tx.send(Task::Shutdown);
+        }
+
+        for handle in std::mem::take(&mut self.worker_handle) {
+            let _ = handle.join();
+        }
     }
 }
 
@@ -127,8 +175,8 @@ mod test {
 
     use tempfile::tempdir;
 
-    #[test]
-    fn example() {
+    #[tokio::test]
+    async fn example() {
         let base_dir = tempdir().unwrap();
         let db = HelixDB::open_default(base_dir.path());
 
@@ -137,9 +185,9 @@ mod test {
             key: b"key".to_vec(),
             value: b"value".to_vec(),
         };
-        db.put(vec![entry.clone()]).unwrap();
+        db.put(vec![entry.clone()]).await.unwrap();
 
-        let result = db.get(0, b"key".to_vec()).unwrap();
+        let result = db.get(0, b"key".to_vec()).await.unwrap();
         assert_eq!(result.unwrap(), entry);
     }
 }

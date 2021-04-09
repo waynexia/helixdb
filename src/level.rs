@@ -287,7 +287,7 @@ impl Levels {
 /// "Timestamp" in `HelixDB` is a logical concept. It is not bound with the real
 /// time. [TimestampReviewer] defines how timestamp should be considered. Including
 /// when to do a compaction, when to outdate a part of data etc.
-pub trait TimestampReviewer {
+pub trait TimestampReviewer: Send + Sync {
     fn observe(&mut self, timestamp: Timestamp) -> Vec<TimestampAction>;
 }
 

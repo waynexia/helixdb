@@ -5,6 +5,8 @@ pub struct Options {
     // parameters
     /// Number of shards. It is recommended to equal to the number of system processors.
     pub(crate) num_shard: usize,
+    /// Queue length of each shard's task receiver.
+    pub(crate) task_buffer_size: usize,
     // helixdb context
     pub(crate) fn_registry: FnRegistry,
     pub(crate) tsr: Box<dyn TimestampReviewer>,
@@ -14,6 +16,7 @@ impl Options {
     pub fn default() -> Self {
         Self {
             num_shard: 8,
+            task_buffer_size: 128,
 
             fn_registry: FnRegistry::new_noop(),
             tsr: Box::new(SimpleTimestampReviewer::new(1024, 1024 * 8)),
