@@ -1,3 +1,4 @@
+use futures_util::future::try_join_all;
 use std::{collections::BTreeMap, usize};
 
 use crate::error::Result;
@@ -40,7 +41,7 @@ impl Rick {
     /// Entry not found will be return as a error.
     ///
     /// Maybe verify key here?
-    pub async fn read(&mut self, offset: u64) -> Result<Entry> {
+    pub async fn read(&self, offset: u64) -> Result<Entry> {
         let meta_buf = self
             .file
             .read(offset, EntryMeta::meta_size() as u64)
@@ -55,8 +56,19 @@ impl Rick {
         Ok(Entry::decode(&offload_buf))
     }
 
+    /// Reads offsets.
+    // todo: this might be refined by batching io.
+    pub async fn reads(&mut self, offsets: Vec<u64>) -> Result<Vec<Entry>> {
+        let mut futures = Vec::with_capacity(offsets.len());
+        for offset in offsets {
+            futures.push(self.read(offset));
+        }
+
+        try_join_all(futures).await
+    }
+
     /// Read all keys
-    pub async fn key_lest(&mut self) -> Result<Vec<Bytes>> {
+    pub async fn key_list(&mut self) -> Result<Vec<Bytes>> {
         let file_size = self.file.size().await?;
         let contents = self.file.read(0, file_size).await?;
         let mut index = 0;

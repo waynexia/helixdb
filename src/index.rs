@@ -1,10 +1,11 @@
 use crate::error::Result;
-use crate::types::{Bytes, Timestamp};
+use crate::types::{Bytes, TimeRange, Timestamp};
 
 use std::collections::{btree_map, BTreeMap};
 
 #[derive(Default, Debug)]
 pub struct MemIndex {
+    /// (timestamp, key) => value's position in rick file.
     pub index: BTreeMap<(Timestamp, Bytes), u64>,
 }
 
@@ -24,5 +25,16 @@ impl MemIndex {
 
     pub fn into_iter(self) -> btree_map::IntoIter<(i64, std::vec::Vec<u8>), u64> {
         self.index.into_iter()
+    }
+
+    pub fn load_time_range(&self, range: TimeRange) -> Vec<u64> {
+        let mut offsets = vec![];
+        for ((ts, _), offset) in &self.index {
+            if range.contains(*ts) {
+                offsets.push(*offset);
+            }
+        }
+
+        offsets
     }
 }

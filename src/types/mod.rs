@@ -6,7 +6,7 @@
 mod entry;
 mod level_info;
 
-pub use entry::{Bytes, Entry, EntryMeta, ThreadId, Timestamp};
+pub use entry::{Bytes, Entry, EntryMeta, ThreadId, TimeRange, Timestamp};
 pub use level_info::{LevelDesc, LevelId, LevelInfo};
 
 // todo: maybe make a trait `Generated` or sth.

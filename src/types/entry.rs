@@ -97,6 +97,27 @@ impl EntryMeta {
     }
 }
 
+pub struct TimeRange {
+    start: Timestamp,
+    end: Timestamp,
+}
+
+impl TimeRange {
+    /// Is `self` containing given timestamp.
+    pub fn contains(&self, ts: Timestamp) -> bool {
+        self.start <= ts && self.end >= ts
+    }
+}
+
+impl From<(Timestamp, Timestamp)> for TimeRange {
+    fn from(tuple: (Timestamp, Timestamp)) -> TimeRange {
+        Self {
+            start: tuple.0,
+            end: tuple.1,
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
 
@@ -113,5 +134,16 @@ mod test {
         let bytes = entry.encode();
 
         assert_eq!(entry, Entry::decode(&bytes));
+    }
+
+    #[test]
+    fn time_range_contains() {
+        let range = TimeRange::from((0, 10));
+
+        assert_eq!(false, range.contains(-1));
+        assert_eq!(true, range.contains(0));
+        assert_eq!(true, range.contains(5));
+        assert_eq!(true, range.contains(10));
+        assert_eq!(false, range.contains(101));
     }
 }

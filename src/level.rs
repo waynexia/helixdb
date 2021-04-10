@@ -8,7 +8,7 @@ use crate::context::Context;
 use crate::error::Result;
 use crate::file::{Rick, SSTable, TableBuilder, VLog, ValueLogBuilder};
 use crate::index::MemIndex;
-use crate::types::{Bytes, Entry, LevelId, LevelInfo, ThreadId, Timestamp};
+use crate::types::{Bytes, Entry, LevelId, LevelInfo, ThreadId, TimeRange, Timestamp};
 
 pub struct LevelConfig {
     /// Use one file to store non-Rick (SSTable) entries or not.
@@ -30,6 +30,7 @@ pub struct Levels {
     timestamp_reviewer: Arc<Mutex<Box<dyn TimestampReviewer>>>,
     ctx: Arc<Context>,
     memindex: MemIndex,
+    // todo: use group of ricks to achieve log-rotate/GC
     rick: Rick,
     level_info: LevelInfo,
     cache: Cache,
@@ -212,7 +213,8 @@ impl Levels {
                         .level_info
                         .add_level(start_ts, end_ts, &self.ctx.file_manager)
                         .await?;
-                    self.compact(start_ts, end_ts, next_level_id).await?;
+                    self.compact(TimeRange::from((start_ts, end_ts)), next_level_id)
+                        .await?;
                 }
                 TimestampAction::Outdate(_) => self.outdate().await?,
             }
@@ -224,12 +226,7 @@ impl Levels {
     /// Compact entries from rick in [start_ts, end_ts] to next level.
     ///
     /// todo: how to handle rick file is not fully covered by given time range?.
-    async fn compact(
-        &mut self,
-        start_ts: Timestamp,
-        end_ts: Timestamp,
-        level_id: LevelId,
-    ) -> Result<()> {
+    async fn compact(&mut self, range: TimeRange, level_id: LevelId) -> Result<()> {
         let mut table_builder = TableBuilder::from(
             self.ctx
                 .file_manager
@@ -240,8 +237,9 @@ impl Levels {
         let mut vlog_builder = ValueLogBuilder::try_from(vlog_builder)?;
         let mut value_positions = vec![];
 
-        // make entry_map
-        let entries = self.rick.entry_list().await?;
+        // make entry_map (from memindex)
+        let offsets = self.memindex.load_time_range(range);
+        let entries = self.rick.reads(offsets).await?;
         let mut entry_map = HashMap::new();
         for entry in entries {
             let Entry {
@@ -257,9 +255,10 @@ impl Levels {
         // call compress_fn to compact points.
         let mut keys = Vec::with_capacity(entry_map.len());
         for (key, ts_value) in entry_map {
-            let compress_fn_name = self.ctx.fn_registry.dispatch_fn()(&key);
-            let compress_fn = self.ctx.fn_registry.udcf(compress_fn_name)?.compress();
-            let compressed_data = compress_fn(key.clone(), ts_value);
+            let compressed_data = self
+                .ctx
+                .fn_registry
+                .compress_entries(key.clone(), ts_value)?;
 
             let (offset, size) = vlog_builder.add_entry(compressed_data).await?;
             value_positions.push((offset, size));
@@ -270,7 +269,9 @@ impl Levels {
         table_builder.add_entries(keys, value_positions);
         table_builder.finish().await?;
 
-        self.rick.clean().await?;
+        // todo: gc rick
+        // self.rick.clean().await?;
+        // todo: gc memindex
 
         Ok(())
     }

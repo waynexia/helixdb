@@ -99,6 +99,12 @@ impl FnRegistry {
             .ok_or(HelixError::NotFound)
     }
 
+    pub fn compress_entries(&self, key: Bytes, data: Vec<(i64, Vec<u8>)>) -> Result<Bytes> {
+        let compress_fn_name = self.dispatch_fn()(&key);
+        let compress_fn = self.udcf(compress_fn_name)?.compress();
+        Ok(compress_fn(key.clone(), data))
+    }
+
     pub fn decompress_entries(&self, key: &Bytes, data: &Bytes) -> Result<Vec<(Timestamp, Bytes)>> {
         let name = self.dispatch_fn()(key);
         let udcf = self.udcf(name)?;
