@@ -3,6 +3,7 @@
 #![feature(with_options)]
 #![feature(vec_into_raw_parts)]
 #![feature(trait_alias)]
+#![feature(btree_retain)]
 #![feature(new_uninit)]
 
 mod blocks;

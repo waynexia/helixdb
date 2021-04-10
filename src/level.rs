@@ -272,6 +272,7 @@ impl Levels {
         // todo: gc rick
         // self.rick.clean().await?;
         // todo: gc memindex
+        self.memindex.purge_time_range(range);
 
         Ok(())
     }

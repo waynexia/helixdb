@@ -37,4 +37,8 @@ impl MemIndex {
 
         offsets
     }
+
+    pub fn purge_time_range(&mut self, range: TimeRange) {
+        self.index.retain(|(ts, _), _| !range.contains(*ts));
+    }
 }

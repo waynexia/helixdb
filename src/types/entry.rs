@@ -97,6 +97,7 @@ impl EntryMeta {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
 pub struct TimeRange {
     start: Timestamp,
     end: Timestamp,
