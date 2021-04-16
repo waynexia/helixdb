@@ -1,5 +1,7 @@
+use std::convert::TryInto;
+use std::mem;
+
 use flatbuffers::FlatBufferBuilder;
-use std::{convert::TryInto, mem};
 
 pub type Bytes = Vec<u8>;
 pub type Timestamp = i64;

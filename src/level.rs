@@ -355,12 +355,12 @@ impl TimestampReviewer for SimpleTimestampReviewer {
 
 #[cfg(test)]
 mod test {
+    use glommio::LocalExecutor;
+    use tempfile::tempdir;
+
     use super::*;
     use crate::file::FileManager;
     use crate::fn_registry::FnRegistry;
-
-    use glommio::LocalExecutor;
-    use tempfile::tempdir;
 
     #[tokio::test]
     async fn simple_timestamp_reviewer_trigger_compact_and_outdate() {

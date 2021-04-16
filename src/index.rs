@@ -1,7 +1,7 @@
+use std::collections::{btree_map, BTreeMap};
+
 use crate::error::Result;
 use crate::types::{Bytes, TimeRange, Timestamp};
-
-use std::collections::{btree_map, BTreeMap};
 
 #[derive(Default, Debug)]
 pub struct MemIndex {

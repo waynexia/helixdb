@@ -120,10 +120,10 @@ impl FileManager {
 
 #[cfg(test)]
 mod test {
-    use super::*;
-
     use glommio::LocalExecutor;
     use tempfile::tempdir;
+
+    use super::*;
 
     #[test]
     fn new_file_manager() {

@@ -1,11 +1,12 @@
-use futures_util::future::try_join_all;
-use glommio::LocalExecutorBuilder;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
+
 // use tokio::sync::mpsc::{channel as bounded_channel, Sender};
 use crossbeam_channel::{bounded, Sender};
+use futures_util::future::try_join_all;
+use glommio::LocalExecutorBuilder;
 use tokio::sync::oneshot::channel as oneshot;
 
 use crate::context::Context;
@@ -171,9 +172,9 @@ impl Drop for HelixCore {
 
 #[cfg(test)]
 mod test {
-    use super::*;
-
     use tempfile::tempdir;
+
+    use super::*;
 
     #[tokio::test]
     async fn example() {

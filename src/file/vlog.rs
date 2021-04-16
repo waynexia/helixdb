@@ -54,10 +54,10 @@ impl TryFrom<File> for ValueLogBuilder {
 
 #[cfg(test)]
 mod test {
-    use super::*;
-
     use glommio::LocalExecutor;
     use tempfile::tempdir;
+
+    use super::*;
 
     #[test]
     fn vlog_builder() {

@@ -1,5 +1,7 @@
+use std::collections::BTreeMap;
+use std::usize;
+
 use futures_util::future::try_join_all;
-use std::{collections::BTreeMap, usize};
 
 use crate::error::Result;
 use crate::index::MemIndex;
@@ -243,11 +245,11 @@ impl Rick {
 
 #[cfg(test)]
 mod test {
-    use super::*;
-    use crate::file::file_manager::FileManager;
-
     use glommio::LocalExecutor;
     use tempfile::tempdir;
+
+    use super::*;
+    use crate::file::file_manager::FileManager;
 
     #[test]
     fn new_super_block() {

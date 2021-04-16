@@ -1,6 +1,7 @@
+use std::path::Path;
+
 use glommio::io::{DmaFile, DmaOpenOptions};
 use glommio::ByteSliceMutExt;
-use std::path::Path;
 
 use crate::error::Result;
 use crate::types::Bytes;

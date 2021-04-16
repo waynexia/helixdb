@@ -1,6 +1,7 @@
-use lru::LruCache;
 use std::cell::RefCell;
 use std::rc::Rc;
+
+use lru::LruCache;
 
 use crate::table::{SSTableHandle, TableIdentifier};
 use crate::types::{Bytes, LevelId, ThreadId, Timestamp};

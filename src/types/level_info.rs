@@ -1,6 +1,7 @@
-use flatbuffers::FlatBufferBuilder;
 use std::collections::VecDeque;
 use std::sync::RwLock;
+
+use flatbuffers::FlatBufferBuilder;
 
 use super::{Bytes, Timestamp};
 use crate::error::Result;
@@ -162,10 +163,10 @@ impl LevelInfo {
 #[cfg(test)]
 mod test {
 
-    use super::*;
-
     use glommio::LocalExecutor;
     use tempfile::tempdir;
+
+    use super::*;
 
     #[test]
     fn level_desc_codec() {
