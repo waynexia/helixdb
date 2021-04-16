@@ -4,23 +4,40 @@ use std::{collections::BTreeMap, usize};
 use crate::error::Result;
 use crate::index::MemIndex;
 use crate::io::File;
-use crate::types::{Bytes, Entry, EntryMeta, Timestamp};
+use crate::types::{Bytes, Entry, EntryMeta, Offset, RickSuperBlock, Timestamp};
 
 /// Handles to entries in rick (level 0).
 ///
 /// Every shard will only have up to one rick file at any time.
+///
+/// (above is out-of-date)
+///
+/// Rick file may contains "hole" due to garbage collection.
+/// It will have a [RickSuperBlock] at the very beginning (offset 0)
+/// which can tell where the legal range is.
+///
+/// Rick can be either ordered or disordered, dependents on which level
+/// it sites.
 pub struct Rick {
     file: File,
+    sb: RickSuperBlock,
 }
 
 impl Rick {
+    pub async fn open(file: File) -> Result<Self> {
+        let sb = Self::read_super_block(&file).await?;
+
+        Ok(Self { file, sb })
+    }
+
     /// Returns vector of (timestamp, key, entry's offset) to update index.
     ///
-    /// `sync()` will be called before returning.
-    pub async fn write(&mut self, entries: Vec<Entry>) -> Result<Vec<(Timestamp, Bytes, u64)>> {
+    /// `sync()` will be called before return.
+    pub async fn append(&mut self, entries: Vec<Entry>) -> Result<Vec<(Timestamp, Bytes, u64)>> {
         let mut positions = Vec::with_capacity(entries.len());
-        let file_length = self.file.size().await?;
+        let file_length = self.sb.legal_offset_end;
 
+        // construct binary buffer.
         let mut buf = vec![];
         for entry in entries {
             let bytes = entry.encode();
@@ -30,7 +47,14 @@ impl Rick {
             buf.extend_from_slice(&bytes);
             positions.push((entry.timestamp, entry.key, file_length + buf_len_before));
         }
+
+        // write to file
+        let new_file_length = file_length + buf.len() as u64;
         self.file.write(buf, file_length).await?;
+
+        // update super block and sync
+        self.sb.legal_offset_end = new_file_length;
+        self.sync_super_block().await?;
         self.sync().await?;
 
         Ok(positions)
@@ -69,8 +93,10 @@ impl Rick {
 
     /// Read all keys
     pub async fn key_list(&mut self) -> Result<Vec<Bytes>> {
-        let file_size = self.file.size().await?;
-        let contents = self.file.read(0, file_size).await?;
+        let contents = self
+            .file
+            .read(self.start(), self.start() - self.end())
+            .await?;
         let mut index = 0;
 
         let mut keys = vec![];
@@ -85,7 +111,7 @@ impl Rick {
             let entry = Entry::decode(offload_buf);
             keys.push(entry.key);
 
-            if index >= file_size as usize {
+            if index >= self.sb.legal_offset_end as usize {
                 break;
             }
         }
@@ -94,8 +120,10 @@ impl Rick {
     }
 
     pub async fn entry_list(&mut self) -> Result<Vec<Entry>> {
-        let file_size = self.file.size().await?;
-        let contents = self.file.read(0, file_size).await?;
+        let contents = self
+            .file
+            .read(self.start(), self.start() - self.end())
+            .await?;
         let mut index = 0;
 
         let mut entries = vec![];
@@ -110,7 +138,7 @@ impl Rick {
             let entry = Entry::decode(offload_buf);
             entries.push(entry);
 
-            if index >= file_size as usize {
+            if index >= self.sb.legal_offset_end as usize {
                 break;
             }
         }
@@ -120,8 +148,10 @@ impl Rick {
 
     /// Scan this rick file and construct its memindex
     pub async fn construct_index(&mut self) -> Result<MemIndex> {
-        let file_size = self.file.size().await?;
-        let contents = self.file.read(0, file_size).await?;
+        let contents = self
+            .file
+            .read(self.start(), self.start() - self.end())
+            .await?;
         let mut index = 0;
 
         let mut indices = BTreeMap::new();
@@ -139,7 +169,7 @@ impl Rick {
             indices.insert((entry.timestamp, entry.key), offset as u64);
             offset += EntryMeta::meta_size() + offload_length;
 
-            if index >= file_size as usize {
+            if index >= self.sb.legal_offset_end as usize {
                 break;
             }
         }
@@ -155,17 +185,59 @@ impl Rick {
     }
 
     /// Drop all entries.
+    #[deprecated]
     pub async fn clean(&mut self) -> Result<()> {
         self.file.truncate(0).await?;
         self.file.sync().await?;
 
         Ok(())
     }
-}
 
-impl From<File> for Rick {
-    fn from(file: File) -> Self {
-        Self { file }
+    /// Read super block from the first 4KB block of file.
+    /// And if file is empty a new super block will be created.
+    async fn read_super_block(file: &File) -> Result<RickSuperBlock> {
+        // check whether super block exist.
+        let file_length = file.size().await?;
+        if file_length == 0 {
+            // create super block and write it to file.
+            let sb = RickSuperBlock {
+                // todo: make it a parameter.
+                is_ordered: false,
+                legal_offset_start: RickSuperBlock::Length as u64,
+                legal_offset_end: RickSuperBlock::Length as u64,
+            };
+
+            let buf = sb.encode();
+            file.write(buf, 0).await?;
+
+            Ok(sb)
+        } else {
+            // otherwise read from head.
+            let buf = file.read(0, RickSuperBlock::Length as u64).await?;
+            let sb = RickSuperBlock::decode(&buf);
+
+            Ok(sb)
+        }
+    }
+
+    // todo: check crash consistency.
+    async fn sync_super_block(&self) -> Result<()> {
+        let buf = self.sb.encode();
+        self.file.write(buf, 0).await?;
+
+        Ok(())
+    }
+
+    /// Get rick's start offset
+    #[inline]
+    pub fn start(&self) -> Offset {
+        self.sb.legal_offset_start
+    }
+
+    /// Get rick's end offset.
+    #[inline]
+    pub fn end(&self) -> Offset {
+        self.sb.legal_offset_end
     }
 }
 
@@ -178,22 +250,56 @@ mod test {
     use tempfile::tempdir;
 
     #[test]
-    fn rick_read_write() {
+    fn new_super_block() {
         let ex = LocalExecutor::default();
 
         ex.run(async {
             let base_dir = tempdir().unwrap();
             let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
-            let mut rick = Rick::from(file_manager.open_rick(1).await.unwrap());
+            let rick_file = file_manager.open_rick(1).await.unwrap();
+            let mut rick = Rick::open(rick_file).await.unwrap();
+
+            assert_eq!(RickSuperBlock::Length, rick.start() as usize);
+            assert_eq!(RickSuperBlock::Length, rick.end() as usize);
+
+            // write something
+            let entry = Entry {
+                timestamp: 1,
+                key: b"key".to_vec(),
+                value: b"value".to_vec(),
+            };
+            rick.append(vec![entry.clone()]).await.unwrap();
+            let new_rick_end = rick.end();
+            assert_ne!(RickSuperBlock::Length, rick.end() as usize);
+
+            // close and open again
+            drop(rick);
+            let rick_file = file_manager.open_rick(1).await.unwrap();
+            let rick = Rick::open(rick_file).await.unwrap();
+
+            assert_eq!(RickSuperBlock::Length, rick.start() as usize);
+            assert_eq!(new_rick_end, rick.end());
+        });
+    }
+
+    #[test]
+    fn read_write_one_entry() {
+        let ex = LocalExecutor::default();
+
+        ex.run(async {
+            let base_dir = tempdir().unwrap();
+            let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
+            let rick_file = file_manager.open_rick(1).await.unwrap();
+            let mut rick = Rick::open(rick_file).await.unwrap();
 
             let entry = Entry {
                 timestamp: 1,
                 key: b"key".to_vec(),
                 value: b"value".to_vec(),
             };
-            rick.write(vec![entry.clone()]).await.unwrap();
+            rick.append(vec![entry.clone()]).await.unwrap();
 
-            let read_entry = rick.read(0).await.unwrap();
+            let read_entry = rick.read(RickSuperBlock::Length as u64).await.unwrap();
             assert_eq!(entry, read_entry);
         });
     }

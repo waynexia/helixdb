@@ -28,3 +28,13 @@ struct LevelDesc {
 table LevelInfo {
     infos: [LevelDesc];
 }
+
+struct Offset {
+    offset: uint64;
+}
+
+table RickSuperBlock {
+    is_ordered: bool;
+    legal_offset_start: Offset;
+    legal_offset_end: Offset;
+}

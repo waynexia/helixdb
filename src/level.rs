@@ -42,7 +42,8 @@ impl Levels {
         timestamp_reviewer: Arc<Mutex<Box<dyn TimestampReviewer>>>,
         ctx: Arc<Context>,
     ) -> Result<Self> {
-        let rick = Rick::from(ctx.file_manager.open_rick(tid).await?);
+        let rick_file = ctx.file_manager.open_rick(tid).await?;
+        let rick = Rick::open(rick_file).await?;
         let level_info = ctx.file_manager.open_level_info().await?;
 
         let cache = Cache::new(CacheConfig::default());
@@ -69,7 +70,7 @@ impl Levels {
             .unwrap()
             .timestamp;
 
-        let indices = self.rick.write(entries).await?;
+        let indices = self.rick.append(entries).await?;
         self.memindex.insert_entries(indices)?;
 
         // review timestamp and handle actions.
