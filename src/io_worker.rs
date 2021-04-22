@@ -1,9 +1,8 @@
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-// use tokio::sync::mpsc::Receiver;
-use crossbeam_channel::Receiver;
 use glommio::Task as GlommioTask;
+use tokio::sync::mpsc::Receiver;
 use tokio::sync::oneshot::Sender;
 
 use crate::context::Context;
@@ -31,8 +30,8 @@ impl IOWorker {
     }
 
     /// Won't return until shut down.
-    pub async fn run(self, rx: Receiver<Task>) {
-        while let Ok(task) = rx.recv() {
+    pub async fn run(self, mut rx: Receiver<Task>) {
+        while let Some(task) = rx.recv().await {
             match task {
                 Task::Put(entries, tx) => {
                     let levels = self.levels.clone();
@@ -40,9 +39,7 @@ impl IOWorker {
                         let result = levels.lock().unwrap().put(entries).await;
                         let _ = tx.send(result);
                     })
-                    .detach()
-                    // todo: find out why this hang without .await
-                    .await;
+                    .detach();
                 }
                 Task::Get(ts, key, tx) => {
                     let levels = self.levels.clone();
@@ -50,8 +47,7 @@ impl IOWorker {
                         let result = levels.lock().unwrap().get(&(ts, key)).await;
                         let _ = tx.send(result);
                     })
-                    .detach()
-                    .await;
+                    .detach();
                 }
                 Task::Scan => unimplemented!(),
                 Task::Shutdown => break,

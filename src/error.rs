@@ -19,5 +19,5 @@ pub enum HelixError {
     #[error("task dropped")]
     Dropped(#[from] tokio::sync::oneshot::error::RecvError),
     #[error("helix stopped")]
-    Stopped(#[from] crossbeam_channel::SendError<Task>),
+    Stopped(#[from] tokio::sync::mpsc::error::SendError<Task>),
 }

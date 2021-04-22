@@ -3,10 +3,9 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
-// use tokio::sync::mpsc::{channel as bounded_channel, Sender};
-use crossbeam_channel::{bounded, Sender};
 use futures_util::future::try_join_all;
 use glommio::LocalExecutorBuilder;
+use tokio::sync::mpsc::{channel as bounded_channel, Sender};
 use tokio::sync::oneshot::channel as oneshot;
 
 use crate::context::Context;
@@ -88,7 +87,7 @@ impl HelixCore {
         for tid in 0..opts.num_shard as u64 {
             let tsr = tsr.clone();
             let ctx = ctx.clone();
-            let (tx, rx) = bounded(opts.task_buffer_size);
+            let (tx, rx) = bounded_channel(opts.task_buffer_size);
 
             let handle = LocalExecutorBuilder::new()
                 .pin_to_cpu(tid as usize)
@@ -132,7 +131,7 @@ impl HelixCore {
         let (tx, rx) = oneshot();
         let task = Task::Put(write_batch, tx);
 
-        self.task_txs[worker].send(task)?;
+        self.task_txs[worker].send(task).await?;
 
         rx.await?
     }
@@ -152,7 +151,7 @@ impl HelixCore {
         let (tx, rx) = oneshot();
         let task = Task::Get(timestamp, key, tx);
 
-        self.task_txs[worker].send(task)?;
+        self.task_txs[worker].send(task).await?;
 
         rx.await?
     }
@@ -160,9 +159,7 @@ impl HelixCore {
 
 impl Drop for HelixCore {
     fn drop(&mut self) {
-        for tx in &self.task_txs {
-            let _ = tx.send(Task::Shutdown);
-        }
+        drop(std::mem::take(&mut self.task_txs));
 
         for handle in std::mem::take(&mut self.worker_handle) {
             let _ = handle.join();
