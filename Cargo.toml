@@ -10,7 +10,8 @@ protos = { path = "protos" }
 flatbuffers = "0.7.0"
 io-uring = "0.5.0"
 tokio = { version = "1.4", features = ["full"] }
-glommio = "0.3"
+# glommio = "0.3"
+glommio = { git = "https://github.com/DataDog/glommio.git", rev = "271d485e3cc5c6118bcb31808e9d31620a54639c" }
 async-trait = "0.1.48"
 lru = "0.6"
 futures-util = "0.3"

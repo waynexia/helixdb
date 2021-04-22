@@ -1,9 +1,10 @@
-use helixdb::option::Options;
-use helixdb::{Entry, FnRegistry, HelixDB, SimpleTimestampReviewer};
-use indicatif::ProgressBar;
 use std::convert::TryInto;
 use std::path::Path;
 use std::sync::Arc;
+
+use helixdb::option::Options;
+use helixdb::{Entry, FnRegistry, HelixDB, SimpleTimestampReviewer};
+use indicatif::ProgressBar;
 use tokio::runtime::Builder;
 
 fn generate_entry(timestamp: i64, key: u64, value_size: usize) -> Entry {

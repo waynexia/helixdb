@@ -2,11 +2,12 @@ use std::collections::BTreeMap;
 use std::usize;
 
 use futures_util::future::try_join_all;
+use glommio::Local;
 
 use crate::error::Result;
 use crate::index::MemIndex;
 use crate::io::File;
-use crate::types::{Bytes, Entry, EntryMeta, Offset, RickSuperBlock, Timestamp};
+use crate::types::{Bytes, Entry, EntryMeta, Offset, RickSuperBlock, TimeRange, Timestamp};
 
 /// Handles to entries in rick (level 0).
 ///
@@ -16,7 +17,10 @@ use crate::types::{Bytes, Entry, EntryMeta, Offset, RickSuperBlock, Timestamp};
 ///
 /// Rick file may contains "hole" due to garbage collection.
 /// It will have a [RickSuperBlock] at the very beginning (offset 0)
-/// which can tell where the legal range is.
+/// contains two pointers "start" and "end" (start < end)
+/// which can tell where the legal range is. The start pointer should
+/// points to a record's beginning. The start pointer is pushed by GC procedure
+/// and end pointer is pushed by both `append()` method and GC procedure.
 ///
 /// Rick can be either ordered or disordered, dependents on which level
 /// it sites.
@@ -35,6 +39,9 @@ impl Rick {
     /// Returns vector of (timestamp, key, entry's offset) to update index.
     ///
     /// `sync()` will be called before return.
+    ///
+    /// Once this method return, this `append` operation is considered finished on rick file.
+    /// Even if it crashed before returned indices are persist.
     pub async fn append(&mut self, entries: Vec<Entry>) -> Result<Vec<(Timestamp, Bytes, u64)>> {
         let mut positions = Vec::with_capacity(entries.len());
         let file_length = self.sb.legal_offset_end;
@@ -186,13 +193,23 @@ impl Rick {
         Ok(())
     }
 
-    /// Drop all entries.
-    #[deprecated]
-    pub async fn clean(&mut self) -> Result<()> {
-        self.file.truncate(0).await?;
-        self.file.sync().await?;
+    /// Recycle entries in given `range` by free them using `fallocate` syscall.
+    ///
+    /// The general procedure would be like:
+    /// - Traverse some entries from "start", for each entry
+    ///     - suit in `range`, should be recycle.
+    ///     - not suit, query index (if have) whether it is legal. Put it into
+    ///     "need rewrite" buffer if is, and discard if not.
+    /// - Acquire write lock and write those "need rewrite" to the end of file.
+    /// Then update index (if have) and sync index (if need).
+    /// - Sync super block to update "start" and "end" pointer to make above change
+    /// visible. After this the write l ock can be released.
+    /// - Recycle space occupied by those offset is smaller than "start" pointer.
+    pub async fn garbage_collect(&self, range: TimeRange) -> Result<()> {
+        // yield control to executor.
+        Local::yield_if_needed().await;
 
-        Ok(())
+        todo!()
     }
 
     /// Read super block from the first 4KB block of file.
