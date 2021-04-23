@@ -33,11 +33,13 @@ fn main() {
                 .about("Write data")
                 .arg(
                     Arg::with_name("entries")
+                        .long("entries")
                         .help("Entries number to fill")
                         .default_value("1024"),
                 )
                 .arg(
                     Arg::with_name("value_size")
+                        .long("value_size")
                         .help("Size of each value in Bytes")
                         .default_value("1024"),
                 ),

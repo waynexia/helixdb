@@ -1,6 +1,8 @@
 use std::convert::TryInto;
 use std::path::Path;
+use std::sync::mpsc::channel;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use helixdb::option::Options;
 use helixdb::{Entry, FnRegistry, HelixDB, SimpleTimestampReviewer};
@@ -42,25 +44,36 @@ pub fn load<P: AsRef<Path>>(
     value_size: usize,
 ) {
     let helixdb = open_db(path, num_shard);
-    // let (tx, rx) = channel();
+    let (tx, rx) = channel();
 
     let bar = ProgressBar::new(num_entry as u64);
     let rt = Builder::new_multi_thread()
         .worker_threads(num_thread)
         .build()
         .unwrap();
+    let begin = Instant::now();
 
     for key in 0..num_entry as u64 {
         let helixdb = helixdb.clone();
-        // let tx = tx.clone();
-        // rt.spawn(async move {
-        helixdb.put(vec![generate_entry(0, key, value_size)]);
-        bar.inc(1);
-        // tx.send(());
-        // });
+        let tx = tx.clone();
+        rt.spawn(async move {
+            helixdb
+                .put(vec![generate_entry(0, key, value_size)])
+                .await
+                .unwrap();
+            tx.send(()).unwrap();
+        });
     }
 
-    // for _ in rx.iter().take(num_entry) {
-    //     bar.inc(1);
-    // }
+    for _ in rx.iter().take(num_entry) {
+        bar.inc(1);
+    }
+    bar.finish();
+
+    let elapsed_us = begin.elapsed().as_micros();
+    println!("elapsed: {:?} us", elapsed_us);
+    println!(
+        "average: {:.2} op/sec",
+        num_entry as f64 / (elapsed_us as f64 / 1_000_000.0)
+    );
 }
