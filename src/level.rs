@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+use tokio::sync::Mutex;
 
 use crate::cache::{Cache, CacheConfig, KeyCacheEntry, KeyCacheResult};
 use crate::context::Context;
@@ -74,11 +76,7 @@ impl Levels {
         self.memindex.insert_entries(indices)?;
 
         // review timestamp and handle actions.
-        let review_actions = self
-            .timestamp_reviewer
-            .lock()
-            .unwrap()
-            .observe(max_timestamp);
+        let review_actions = self.timestamp_reviewer.lock().await.observe(max_timestamp);
         self.handle_actions(review_actions).await?;
 
         Ok(())

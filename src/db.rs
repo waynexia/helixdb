@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread::JoinHandle;
 
 use futures_util::future::try_join_all;
 use glommio::LocalExecutorBuilder;
 use tokio::sync::mpsc::{channel as bounded_channel, Sender};
 use tokio::sync::oneshot::channel as oneshot;
+use tokio::sync::Mutex;
 
 use crate::context::Context;
 use crate::error::Result;

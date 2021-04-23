@@ -1,9 +1,10 @@
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use glommio::Task as GlommioTask;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::oneshot::Sender;
+use tokio::sync::Mutex;
 
 use crate::context::Context;
 use crate::error::Result;
@@ -36,7 +37,7 @@ impl IOWorker {
                 Task::Put(entries, tx) => {
                     let levels = self.levels.clone();
                     GlommioTask::local(async move {
-                        let result = levels.lock().unwrap().put(entries).await;
+                        let result = levels.lock().await.put(entries).await;
                         let _ = tx.send(result);
                     })
                     .detach();
@@ -44,7 +45,7 @@ impl IOWorker {
                 Task::Get(ts, key, tx) => {
                     let levels = self.levels.clone();
                     GlommioTask::local(async move {
-                        let result = levels.lock().unwrap().get(&(ts, key)).await;
+                        let result = levels.lock().await.get(&(ts, key)).await;
                         let _ = tx.send(result);
                     })
                     .detach();
