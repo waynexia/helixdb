@@ -14,7 +14,7 @@ use crate::types::{Bytes, Entry, ThreadId, Timestamp};
 /// A un-Send handle to accept and process requests.
 pub struct IOWorker {
     tid: ThreadId,
-    levels: Rc<Mutex<Levels>>,
+    levels: Rc<Levels>,
     // todo: maybe add channel mesh
 }
 
@@ -25,7 +25,7 @@ impl IOWorker {
         ctx: Arc<Context>,
     ) -> Result<Self> {
         let levels = Levels::try_new(tid, timestamp_reviewer, ctx).await?;
-        let levels = Rc::new(Mutex::new(levels));
+        let levels = levels;
 
         Ok(Self { tid, levels })
     }
@@ -37,15 +37,14 @@ impl IOWorker {
                 Task::Put(entries, tx) => {
                     let levels = self.levels.clone();
                     GlommioTask::local(async move {
-                        let result = levels.lock().await.put(entries).await;
-                        let _ = tx.send(result);
+                        levels.put(entries, tx).await;
                     })
                     .detach();
                 }
                 Task::Get(ts, key, tx) => {
                     let levels = self.levels.clone();
                     GlommioTask::local(async move {
-                        let result = levels.lock().await.get(&(ts, key)).await;
+                        let result = levels.get(&(ts, key)).await;
                         let _ = tx.send(result);
                     })
                     .detach();
@@ -59,6 +58,7 @@ impl IOWorker {
 
 #[derive(Debug)]
 pub enum Task {
+    // todo: add put option
     Put(Vec<Entry>, Sender<Result<()>>),
     Get(Timestamp, Bytes, Sender<Result<Option<Entry>>>),
     Scan,

@@ -1,13 +1,18 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
+use glommio::sync::RwLock;
+use glommio::timer::TimerActionOnce;
+use tokio::sync::oneshot::Sender;
 use tokio::sync::Mutex;
 
 use crate::cache::{Cache, CacheConfig, KeyCacheEntry, KeyCacheResult};
 use crate::context::Context;
-use crate::error::Result;
+use crate::error::{HelixError, Result};
 use crate::file::{Rick, SSTable, TableBuilder, VLog, ValueLogBuilder};
 use crate::index::MemIndex;
 use crate::types::{Bytes, Entry, LevelId, LevelInfo, ThreadId, TimeRange, Timestamp};
@@ -26,16 +31,17 @@ pub struct LevelConfig {
 
 /// APIs require unique reference (&mut self) because this `Level` is designed to be used
 /// inside one thread (!Send). The fields should also be !Send if possible.
-pub struct Levels {
+pub(crate) struct Levels {
     tid: ThreadId,
     // todo: remove this mutex
     timestamp_reviewer: Arc<Mutex<Box<dyn TimestampReviewer>>>,
     ctx: Arc<Context>,
-    memindex: MemIndex,
+    memindex: Mutex<MemIndex>,
     // todo: use group of ricks to achieve log-rotate/GC
-    rick: Rick,
-    level_info: LevelInfo,
+    rick: Mutex<Rick>,
+    level_info: Mutex<LevelInfo>,
     cache: Cache,
+    write_batch: Rc<WriteBatch>,
 }
 
 impl Levels {
@@ -43,25 +49,39 @@ impl Levels {
         tid: ThreadId,
         timestamp_reviewer: Arc<Mutex<Box<dyn TimestampReviewer>>>,
         ctx: Arc<Context>,
-    ) -> Result<Self> {
+    ) -> Result<Rc<Self>> {
         let rick_file = ctx.file_manager.open_rick(tid).await?;
         let rick = Rick::open(rick_file).await?;
         let level_info = ctx.file_manager.open_level_info().await?;
 
         let cache = Cache::new(CacheConfig::default());
+        let write_batch = WriteBatch::new();
 
-        Ok(Self {
+        let levels = Self {
             tid,
             timestamp_reviewer,
             ctx,
-            memindex: MemIndex::default(),
-            rick,
-            level_info,
+            memindex: Mutex::new(MemIndex::default()),
+            rick: Mutex::new(rick),
+            level_info: Mutex::new(level_info),
             cache,
-        })
+            write_batch: Rc::new(write_batch),
+        };
+
+        let levels = Rc::new(levels);
+
+        Ok(levels)
     }
 
-    pub async fn put(&mut self, entries: Vec<Entry>) -> Result<()> {
+    pub async fn put(self: Rc<Self>, entries: Vec<Entry>, notifier: Sender<Result<()>>) {
+        self.write_batch
+            .clone()
+            .enqueue(entries, notifier, self.clone())
+            .await;
+    }
+
+    /// Put entries without batching them.
+    pub async fn put_internal(&self, entries: Vec<Entry>) -> Result<()> {
         if entries.is_empty() {
             return Ok(());
         }
@@ -72,8 +92,8 @@ impl Levels {
             .unwrap()
             .timestamp;
 
-        let indices = self.rick.append(entries).await?;
-        self.memindex.insert_entries(indices)?;
+        let indices = self.rick.lock().await.append(entries).await?;
+        self.memindex.lock().await.insert_entries(indices)?;
 
         // review timestamp and handle actions.
         let review_actions = self.timestamp_reviewer.lock().await.observe(max_timestamp);
@@ -82,8 +102,8 @@ impl Levels {
         Ok(())
     }
 
-    pub async fn get(&mut self, time_key: &(Timestamp, Bytes)) -> Result<Option<Entry>> {
-        let level = self.level_info.get_level_id(time_key.0);
+    pub async fn get(&self, time_key: &(Timestamp, Bytes)) -> Result<Option<Entry>> {
+        let level = self.level_info.lock().await.get_level_id(time_key.0);
         match level {
             None => Ok(None),
             Some(0) => self.get_from_rick(time_key).await,
@@ -92,9 +112,9 @@ impl Levels {
     }
 
     #[inline]
-    async fn get_from_rick(&mut self, time_key: &(Timestamp, Bytes)) -> Result<Option<Entry>> {
-        if let Some(offset) = self.memindex.get(time_key)? {
-            let entry = self.rick.read(offset).await?;
+    async fn get_from_rick(&self, time_key: &(Timestamp, Bytes)) -> Result<Option<Entry>> {
+        if let Some(offset) = self.memindex.lock().await.get(time_key)? {
+            let entry = self.rick.lock().await.read(offset).await?;
 
             return Ok(Some(entry));
         }
@@ -105,7 +125,7 @@ impl Levels {
     // todo: refine
     #[inline]
     async fn get_from_table(
-        &mut self,
+        &self,
         time_key: &(Timestamp, Bytes),
         level_id: LevelId,
     ) -> Result<Option<Entry>> {
@@ -204,12 +224,14 @@ impl Levels {
         entry
     }
 
-    async fn handle_actions(&mut self, actions: Vec<TimestampAction>) -> Result<()> {
+    async fn handle_actions(&self, actions: Vec<TimestampAction>) -> Result<()> {
         for action in actions {
             match action {
                 TimestampAction::Compact(start_ts, end_ts) => {
                     let next_level_id = self
                         .level_info
+                        .lock()
+                        .await
                         .add_level(start_ts, end_ts, &self.ctx.file_manager)
                         .await?;
                     self.compact(TimeRange::from((start_ts, end_ts)), next_level_id)
@@ -225,7 +247,7 @@ impl Levels {
     /// Compact entries from rick in [start_ts, end_ts] to next level.
     ///
     /// todo: how to handle rick file is not fully covered by given time range?.
-    async fn compact(&mut self, range: TimeRange, level_id: LevelId) -> Result<()> {
+    async fn compact(&self, range: TimeRange, level_id: LevelId) -> Result<()> {
         let mut table_builder = TableBuilder::from(
             self.ctx
                 .file_manager
@@ -237,8 +259,8 @@ impl Levels {
         let mut value_positions = vec![];
 
         // make entry_map (from memindex)
-        let offsets = self.memindex.load_time_range(range);
-        let entries = self.rick.reads(offsets).await?;
+        let offsets = self.memindex.lock().await.load_time_range(range);
+        let entries = self.rick.lock().await.reads(offsets).await?;
         let mut entry_map = HashMap::new();
         for entry in entries {
             let Entry {
@@ -271,13 +293,15 @@ impl Levels {
         // todo: gc rick
         // self.rick.clean().await?;
         // todo: gc memindex
-        self.memindex.purge_time_range(range);
+        self.memindex.lock().await.purge_time_range(range);
 
         Ok(())
     }
 
-    async fn outdate(&mut self) -> Result<()> {
+    async fn outdate(&self) -> Result<()> {
         self.level_info
+            .lock()
+            .await
             .remove_last_level(&self.ctx.file_manager)
             .await?;
 
@@ -351,10 +375,114 @@ impl TimestampReviewer for SimpleTimestampReviewer {
     }
 }
 
+/// Batching write request
+struct WriteBatch {
+    notifier: RefCell<Vec<Sender<Result<()>>>>,
+    buf: RefCell<Vec<Entry>>,
+    timeout: Duration,
+    batch_size: usize,
+    lock: Mutex<()>,
+    /// Generated by `TimerActionOnce::do_in()` with the purpose of
+    /// consuming batched entries after some duration.
+    action: RwLock<Option<TimerActionOnce<()>>>,
+    // level: Rc<Levels>,
+}
+
+impl WriteBatch {
+    // todo: add configuration
+    pub fn new() -> Self {
+        Self {
+            notifier: RefCell::new(vec![]),
+            buf: RefCell::new(vec![]),
+            timeout: Duration::from_millis(500),
+            batch_size: 4096,
+            lock: Mutex::new(()),
+            action: RwLock::new(None),
+        }
+    }
+
+    /// Enqueue some write requests. Then check the size limit.
+    /// This will reset the timeout timer.
+    pub async fn enqueue(
+        self: Rc<Self>,
+        mut reqs: Vec<Entry>,
+        tx: Sender<Result<()>>,
+        level: Rc<Levels>,
+    ) {
+        // enqueue
+        let guard = self.lock.lock().await;
+        self.notifier.borrow_mut().push(tx);
+        self.buf.borrow_mut().append(&mut reqs);
+
+        // check size limit
+        if self.buf.borrow().len() >= self.batch_size {
+            drop(guard);
+            self.consume(level).await;
+        } else {
+            drop(guard);
+            self.set_or_rearm(level).await;
+        }
+    }
+
+    /// Consume all batched entries.
+    pub async fn consume(self: Rc<Self>, level: Rc<Levels>) {
+        // let mut action_guard = self.action.write().await.unwrap();
+        // take contents
+        let guard = self.lock.lock().await;
+        let notifier = self.notifier.take();
+        let buf = self.buf.take();
+        drop(guard);
+
+        // write and reply
+        let result = level.put_internal(buf).await;
+        if result.is_ok() {
+            for tx in notifier {
+                let _ = tx.send(Ok(()));
+            }
+        } else {
+            for tx in notifier {
+                let _ = tx.send(Err(HelixError::Poisoned("Put".to_string())));
+            }
+        }
+
+        // todo: finish cancellation
+        // destroy action timer as this "consume action" is already triggered
+        // (regardless of it is triggered by timer or `Levels`').
+        // if let Some(action) = action_guard.take() {
+        //     action.cancel().await;
+        // }
+    }
+
+    async fn destroy_action(&self) {
+        let mut action_guard = self.action.write().await.unwrap();
+        if let Some(action) = &*action_guard {
+            action.destroy();
+        }
+        drop(action_guard.take());
+    }
+
+    async fn set_or_rearm(self: Rc<Self>, level: Rc<Levels>) {
+        let mut action = self.action.write().await.unwrap();
+
+        // rearm timer
+        if let Some(action) = &*action {
+            action.rearm_in(self.timeout);
+            return;
+        }
+
+        // otherwise set the action
+        *action = Some(TimerActionOnce::do_in(
+            self.timeout,
+            self.clone().consume(level),
+        ));
+    }
+}
+
 #[cfg(test)]
 mod test {
     use glommio::LocalExecutor;
     use tempfile::tempdir;
+    use tokio::sync::oneshot::channel as oneshot;
 
     use super::*;
     use crate::file::FileManager;
@@ -394,7 +522,7 @@ mod test {
             });
             let timestamp_reviewer: Arc<Mutex<Box<dyn TimestampReviewer>>> =
                 Arc::new(Mutex::new(Box::new(SimpleTimestampReviewer::new(10, 30))));
-            let mut levels = Levels::try_new(1, timestamp_reviewer, ctx).await.unwrap();
+            let levels = Levels::try_new(1, timestamp_reviewer, ctx).await.unwrap();
 
             let entries = vec![
                 (1, b"key1".to_vec(), b"value1".to_vec()).into(),
@@ -405,7 +533,7 @@ mod test {
                 (3, b"key3".to_vec(), b"value1".to_vec()).into(),
             ];
 
-            levels.put(entries.clone()).await.unwrap();
+            levels.put_internal(entries.clone()).await.unwrap();
 
             for entry in entries {
                 assert_eq!(entry, levels.get(entry.time_key()).await.unwrap().unwrap());
@@ -413,7 +541,7 @@ mod test {
 
             // overwrite a key
             let new_entry: Entry = (1, b"key1".to_vec(), b"value3".to_vec()).into();
-            levels.put(vec![new_entry.clone()]).await.unwrap();
+            levels.put_internal(vec![new_entry.clone()]).await.unwrap();
             assert_eq!(
                 new_entry,
                 levels.get(new_entry.time_key()).await.unwrap().unwrap()
@@ -434,13 +562,13 @@ mod test {
             });
             let timestamp_reviewer: Arc<Mutex<Box<dyn TimestampReviewer>>> =
                 Arc::new(Mutex::new(Box::new(SimpleTimestampReviewer::new(10, 30))));
-            let mut levels = Levels::try_new(1, timestamp_reviewer, ctx.clone())
+            let levels = Levels::try_new(1, timestamp_reviewer, ctx.clone())
                 .await
                 .unwrap();
 
             for timestamp in 0..25 {
                 levels
-                    .put(vec![(timestamp, b"key".to_vec(), b"value".to_vec()).into()])
+                    .put_internal(vec![(timestamp, b"key".to_vec(), b"value".to_vec()).into()])
                     .await
                     .unwrap();
             }

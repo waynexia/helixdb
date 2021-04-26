@@ -12,12 +12,14 @@ pub enum HelixError {
     IO(#[from] io::Error),
     #[error("Glommio error {0}")]
     Glommio(#[from] glommio::GlommioError<()>),
-    #[error("common HelixDB error")]
+    #[error("Common HelixDB error")]
     Common,
-    #[error("element not found")]
+    #[error("Element not found")]
     NotFound,
-    #[error("task dropped")]
+    #[error("Task dropped")]
     Dropped(#[from] tokio::sync::oneshot::error::RecvError),
-    #[error("helix stopped")]
+    #[error("Helix stopped")]
     Stopped(#[from] tokio::sync::mpsc::error::SendError<Task>),
+    #[error("Operation {0} is poisoned")]
+    Poisoned(String),
 }
