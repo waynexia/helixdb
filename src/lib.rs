@@ -21,6 +21,7 @@ mod level;
 pub mod option;
 mod table;
 mod types;
+mod util;
 
 pub use db::*;
 pub use fn_registry::FnRegistry;
