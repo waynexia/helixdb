@@ -183,7 +183,7 @@ impl Rick {
             }
         }
 
-        let mem_index = MemIndex { index: indices };
+        let mem_index = MemIndex::from_existing(indices);
         Ok(mem_index)
     }
 
