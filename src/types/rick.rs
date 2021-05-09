@@ -4,6 +4,8 @@ use super::Bytes;
 
 pub type Offset = u64;
 
+pub type ValueFormat = protos::ValueFormat;
+
 /// [Rick] file's super block.
 ///
 /// The binary representation will be padded to 4KB.
@@ -13,6 +15,7 @@ pub struct RickSuperBlock {
     pub legal_offset_start: Offset,
     pub legal_offset_end: Offset,
     // todo: add `version` and `crc` fields
+    pub value_format: ValueFormat,
 }
 
 impl RickSuperBlock {
@@ -30,6 +33,7 @@ impl RickSuperBlock {
                 is_ordered: self.is_ordered,
                 legal_offset_start: Some(&legal_offset_start),
                 legal_offset_end: Some(&legal_offset_end),
+                value_format: self.value_format,
             },
         );
 
@@ -51,6 +55,7 @@ impl RickSuperBlock {
             is_ordered: fb_sb.is_ordered(),
             legal_offset_start: fb_sb.legal_offset_start().unwrap().offset(),
             legal_offset_end: fb_sb.legal_offset_end().unwrap().offset(),
+            value_format: fb_sb.value_format(),
         }
     }
 }
@@ -65,6 +70,7 @@ mod test {
             is_ordered: true,
             legal_offset_start: 4096,
             legal_offset_end: 8192,
+            value_format: ValueFormat::RawValue,
         };
 
         let bytes = sb.encode();

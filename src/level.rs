@@ -17,7 +17,7 @@ use crate::context::Context;
 use crate::error::{HelixError, Result};
 use crate::file::{Rick, SSTable, TableBuilder, VLog, ValueLogBuilder};
 use crate::index::MemIndex;
-use crate::types::{Bytes, Entry, LevelId, LevelInfo, ThreadId, TimeRange, Timestamp};
+use crate::types::{Bytes, Entry, LevelId, LevelInfo, ThreadId, TimeRange, Timestamp, ValueFormat};
 
 pub struct LevelConfig {
     /// Use one file to store non-Rick (SSTable) entries or not.
@@ -53,7 +53,7 @@ impl Levels {
         ctx: Arc<Context>,
     ) -> Result<Rc<Self>> {
         let rick_file = ctx.file_manager.open_rick(tid).await?;
-        let rick = Rick::open(rick_file).await?;
+        let rick = Rick::open(rick_file, Some(ValueFormat::RawValue)).await?;
         let level_info = ctx.file_manager.open_level_info().await?;
 
         let cache = Cache::new(CacheConfig::default());
@@ -63,6 +63,7 @@ impl Levels {
             tid,
             timestamp_reviewer,
             ctx,
+            // todo: recovery memindex of rick's
             memindex: Mutex::new(MemIndex::default()),
             rick: Mutex::new(rick),
             level_info: Mutex::new(level_info),

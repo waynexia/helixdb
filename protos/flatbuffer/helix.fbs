@@ -33,8 +33,15 @@ struct Offset {
     offset: uint64;
 }
 
+enum ValueFormat : uint32 {
+    RawValue,
+    CompressedValue,
+}
+
 table RickSuperBlock {
     is_ordered: bool;
     legal_offset_start: Offset;
     legal_offset_end: Offset;
+    value_format: ValueFormat;
 }
+

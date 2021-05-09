@@ -7,7 +7,16 @@ use glommio::Local;
 use crate::error::Result;
 use crate::index::MemIndex;
 use crate::io::File;
-use crate::types::{Bytes, Entry, EntryMeta, Offset, RickSuperBlock, TimeRange, Timestamp};
+use crate::types::{
+    Bytes,
+    Entry,
+    EntryMeta,
+    Offset,
+    RickSuperBlock,
+    TimeRange,
+    Timestamp,
+    ValueFormat,
+};
 
 /// Handles to entries in rick (level 0).
 ///
@@ -30,8 +39,14 @@ pub struct Rick {
 }
 
 impl Rick {
-    pub async fn open(file: File) -> Result<Self> {
-        let sb = Self::read_super_block(&file).await?;
+    /// Open a `Rick` from given file.
+    ///
+    /// Optional parameter `value_format` will be used to initialize a rick file.
+    /// If the rick file is not empty it will be ignored. If `None` is provided,
+    /// the `value_format` field in super block will be set to default value, which is
+    /// `RawValue`.
+    pub async fn open(file: File, value_format: Option<ValueFormat>) -> Result<Self> {
+        let sb = Self::read_super_block(&file, value_format).await?;
 
         Ok(Self { file, sb })
     }
@@ -101,6 +116,7 @@ impl Rick {
     }
 
     /// Read all keys
+    #[deprecated]
     pub async fn key_list(&mut self) -> Result<Vec<Bytes>> {
         let contents = self
             .file
@@ -128,6 +144,7 @@ impl Rick {
         Ok(keys)
     }
 
+    #[deprecated]
     pub async fn entry_list(&mut self) -> Result<Vec<Entry>> {
         let contents = self
             .file
@@ -156,6 +173,9 @@ impl Rick {
     }
 
     /// Scan this rick file and construct its memindex
+    ///
+    /// Generally, Rick file will couple with a persisted index file SSTable.
+    /// Except those new ricks that memindex is not flushed to disk yet.
     pub async fn construct_index(&mut self) -> Result<MemIndex> {
         let contents = self
             .file
@@ -214,16 +234,25 @@ impl Rick {
 
     /// Read super block from the first 4KB block of file.
     /// And if file is empty a new super block will be created.
-    async fn read_super_block(file: &File) -> Result<RickSuperBlock> {
+    ///
+    /// `value_format` only works when initializing rick file.
+    /// Default value is `RawValue`.
+    async fn read_super_block(
+        file: &File,
+        value_format: Option<ValueFormat>,
+    ) -> Result<RickSuperBlock> {
         // check whether super block exist.
         let file_length = file.size().await?;
         if file_length == 0 {
+            let value_format = value_format.unwrap_or(ValueFormat::RawValue);
             // create super block and write it to file.
             let sb = RickSuperBlock {
                 // todo: make it a parameter.
                 is_ordered: false,
                 legal_offset_start: RickSuperBlock::Length as u64,
                 legal_offset_end: RickSuperBlock::Length as u64,
+                // todo: make it a parameter.
+                value_format,
             };
 
             let buf = sb.encode();
@@ -276,7 +305,7 @@ mod test {
             let base_dir = tempdir().unwrap();
             let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
             let rick_file = file_manager.open_rick(1).await.unwrap();
-            let mut rick = Rick::open(rick_file).await.unwrap();
+            let mut rick = Rick::open(rick_file, None).await.unwrap();
 
             assert_eq!(RickSuperBlock::Length, rick.start() as usize);
             assert_eq!(RickSuperBlock::Length, rick.end() as usize);
@@ -294,7 +323,7 @@ mod test {
             // close and open again
             drop(rick);
             let rick_file = file_manager.open_rick(1).await.unwrap();
-            let rick = Rick::open(rick_file).await.unwrap();
+            let rick = Rick::open(rick_file, None).await.unwrap();
 
             assert_eq!(RickSuperBlock::Length, rick.start() as usize);
             assert_eq!(new_rick_end, rick.end());
@@ -309,7 +338,7 @@ mod test {
             let base_dir = tempdir().unwrap();
             let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
             let rick_file = file_manager.open_rick(1).await.unwrap();
-            let mut rick = Rick::open(rick_file).await.unwrap();
+            let mut rick = Rick::open(rick_file, None).await.unwrap();
 
             let entry = Entry {
                 timestamp: 1,
