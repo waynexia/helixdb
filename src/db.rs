@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::Path;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
@@ -13,8 +14,17 @@ use crate::context::Context;
 use crate::error::Result;
 use crate::file::FileManager;
 use crate::io_worker::{IOWorker, Task};
+use crate::iterator::{
+    Iterator,
+    ScanOption,
+    ShardMuxTimeIterator,
+    ShardTimeIterator,
+    TimeIterator,
+};
+use crate::level::Levels;
 use crate::option::Options;
-use crate::types::{Bytes, Entry};
+use crate::types::{Bytes, Entry, TimeRange};
+use crate::util::Comparator;
 
 /// Size of channels that used to do IPC between shards.
 const CHANNEL_MESH_SIZE: usize = 128;
@@ -58,16 +68,20 @@ impl HelixDB {
         self.core.get_unchecked(shard_id, timestamp, key).await
     }
 
-    pub async fn scan(&self) {
-        todo!()
+    pub async fn scan<C: Comparator + 'static>(
+        &self,
+        time_range: TimeRange,
+        key_range: (Bytes, Bytes),
+        opt: ScanOption,
+    ) -> Result<impl Iterator> {
+        self.core.scan::<C>(time_range, key_range, opt).await
     }
 }
 
 unsafe impl Send for HelixDB {}
 unsafe impl Sync for HelixDB {}
 
-struct HelixCore {
-    // todo: remove lock
+pub(crate) struct HelixCore {
     /// Join handles of shards' working threads.
     worker_handle: Vec<JoinHandle<()>>,
     task_txs: Vec<Sender<Task>>,
@@ -156,7 +170,55 @@ impl HelixCore {
 
         rx.await?
     }
+
+    async fn scan<C: Comparator + 'static>(
+        &self,
+        time_range: TimeRange,
+        key_range: (Bytes, Bytes),
+        opt: ScanOption,
+    ) -> Result<impl Iterator> {
+        let iters: Vec<_> = (0..self.shards())
+            .map(|worker| (worker, key_range.clone()))
+            .map(async move |(worker, key_range)| -> Result<_> {
+                let (tx, rx) = bounded_channel(opt.prefetch_buf_size);
+                // let task = Task::Scan(time_range, key_range.0, key_range.1, tx);
+
+                // let level_scan_task = async move |level: Levels| -> Result<()> {
+                //     level
+                //         .scan::<C>(time_range, key_range.0, key_range.1, tx)
+                //         .await
+                // };
+
+                self.task_txs[worker]
+                    .send(Task::Scan(
+                        time_range,
+                        key_range.0,
+                        key_range.1,
+                        tx,
+                        Arc::new(C::cmp),
+                    ))
+                    .await?;
+                Ok(ShardTimeIterator::new(rx).await)
+            })
+            .collect();
+
+        let iters = try_join_all(iters).await?;
+        let mux_iter = ShardMuxTimeIterator::<C>::new(iters, opt.prefetch_buf_size).await;
+        let iter = TimeIterator::new(mux_iter);
+
+        Ok(iter)
+    }
+
+    fn shards(&self) -> usize {
+        self.worker_handle.len()
+    }
 }
+
+// async fn async_scan<C: Comparator>(levels: Rc<Levels>) -> Result<()> {
+//     levels
+//         .scan::<C>(time_range, key_range.0, key_range.1, tx)
+//         .await
+// }
 
 impl Drop for HelixCore {
     fn drop(&mut self) {

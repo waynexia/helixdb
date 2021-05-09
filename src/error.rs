@@ -3,6 +3,7 @@ use std::io;
 use thiserror::Error;
 
 use crate::io_worker::Task;
+use crate::types::Entry;
 
 pub type Result<T> = std::result::Result<T, HelixError>;
 
@@ -22,4 +23,7 @@ pub enum HelixError {
     Stopped(#[from] tokio::sync::mpsc::error::SendError<Task>),
     #[error("Operation {0} is poisoned")]
     Poisoned(String),
+    // todo: review this usage.
+    #[error("Internal channel disconnected")]
+    Disconnected(#[from] tokio::sync::mpsc::error::SendError<Vec<Entry>>),
 }

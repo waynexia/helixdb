@@ -16,8 +16,11 @@ impl<T: Index<usize, Output = Entry> + Borrow<Vec<Entry>>> KeyExtractor<T> for V
     }
 }
 
-pub trait Comparator: Eq {
-    fn cmp(lhs: &[u8], rhs: &[u8]) -> Ordering;
+// todo: remove Eq bound?
+pub trait Comparator: Send + Sync + Eq {
+    fn cmp(lhs: &[u8], rhs: &[u8]) -> Ordering
+    where
+        Self: Sized;
 }
 
 // todo: simplify this. put KeyExtractor into T.
@@ -49,5 +52,16 @@ impl<O: Comparator, E: KeyExtractor<T>, T: Borrow<E>> From<T> for OrderingHelper
             _o: PhantomData,
             _e: PhantomData,
         }
+    }
+}
+
+#[derive(Eq, PartialEq)]
+/// This comparator returns `Ordering::Equal` for every operands.
+/// Which will ignore the provided left and right bound and result a full table scan.
+pub struct NoOrderComparator {}
+
+impl Comparator for NoOrderComparator {
+    fn cmp(_: &[u8], _: &[u8]) -> Ordering {
+        Ordering::Equal
     }
 }

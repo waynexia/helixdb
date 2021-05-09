@@ -1,5 +1,6 @@
 use std::convert::TryInto;
 use std::mem;
+use std::ops::Range;
 
 use flatbuffers::FlatBufferBuilder;
 
@@ -99,6 +100,7 @@ impl EntryMeta {
     }
 }
 
+// todo: replace with std::ops::Range.
 #[derive(Debug, Copy, Clone)]
 pub struct TimeRange {
     start: Timestamp,
@@ -109,6 +111,13 @@ impl TimeRange {
     /// Is `self` containing given timestamp.
     pub fn contains(&self, ts: Timestamp) -> bool {
         self.start <= ts && self.end >= ts
+    }
+
+    pub fn range(&self) -> Range<Timestamp> {
+        Range {
+            start: self.start,
+            end: self.end,
+        }
     }
 }
 

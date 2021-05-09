@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::rc::Rc;
@@ -7,6 +8,7 @@ use std::time::Duration;
 
 use glommio::sync::RwLock;
 use glommio::timer::TimerActionOnce;
+use tokio::sync::mpsc::Sender as BoundedSender;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::Mutex;
 
@@ -109,6 +111,37 @@ impl Levels {
             Some(0) => self.get_from_rick(time_key).await,
             Some(l) => self.get_from_table(time_key, l).await,
         }
+    }
+
+    // todo: handle multi level scan
+    pub async fn scan(
+        &self,
+        time_range: TimeRange,
+        key_start: Bytes,
+        key_end: Bytes,
+        sender: BoundedSender<Vec<Entry>>,
+        cmp: Arc<dyn Fn(&[u8], &[u8]) -> Ordering>,
+    ) -> Result<()> {
+        let mut user_keys = self.memindex.lock().await.user_keys();
+        // filter
+        user_keys.retain(|key| {
+            cmp(key, &key_start) != Ordering::Less && cmp(key, &key_end) != Ordering::Greater
+        });
+        // sort
+        user_keys.sort_by(|lhs, rhs| cmp(lhs, rhs));
+
+        // todo: refine this
+        for user_key in user_keys {
+            let mut time_key = (0, user_key);
+            for ts in time_range.range() {
+                time_key.0 = ts;
+                if let Some(entry) = self.get(&time_key).await? {
+                    sender.send(vec![entry]).await?;
+                };
+            }
+        }
+
+        Ok(())
     }
 
     #[inline]
