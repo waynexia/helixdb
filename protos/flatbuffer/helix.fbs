@@ -45,3 +45,24 @@ table RickSuperBlock {
     value_format: ValueFormat;
 }
 
+enum BlockType: uint64 {
+    SuperBlock,
+    IndexBlock,
+    FilterBlock,
+}
+
+struct BlockInfo {
+    block_type: BlockType;
+    offset: Offset;
+    length: uint64;
+}
+
+table SSTableSuperBlock {
+    blocks: [BlockInfo];
+}
+
+table IndexBlockEntry {
+    value_offset: Offset;
+    timestamp: Timestamp;
+    key: [ubyte];
+}

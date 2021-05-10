@@ -2,15 +2,15 @@ use flatbuffers::FlatBufferBuilder;
 
 use super::Bytes;
 
-pub type Offset = u64;
+pub(crate) type Offset = u64;
 
-pub type ValueFormat = protos::ValueFormat;
+pub(crate) type ValueFormat = protos::ValueFormat;
 
 /// [Rick] file's super block.
 ///
 /// The binary representation will be padded to 4KB.
 #[derive(Debug, PartialEq, Eq)]
-pub struct RickSuperBlock {
+pub(crate) struct RickSuperBlock {
     pub is_ordered: bool,
     pub legal_offset_start: Offset,
     pub legal_offset_end: Offset,
@@ -41,7 +41,7 @@ impl RickSuperBlock {
         let mut padding_bytes = fbb.finished_data().to_vec();
 
         // the un-padding bytes should shorter than 4096 otherwise it will be truncated.
-        debug_assert_eq!(true, padding_bytes.len() <= 4096);
+        debug_assert_eq!(true, padding_bytes.len() <= Self::Length);
         // padding it. Flatbuffers has the information about payload's length, so tailing
         // zero doesn't matter.
         padding_bytes.resize(Self::Length, 0);
@@ -75,7 +75,6 @@ mod test {
 
         let bytes = sb.encode();
         assert_eq!(bytes.len(), RickSuperBlock::Length);
-
         assert_eq!(sb, RickSuperBlock::decode(&bytes));
     }
 }

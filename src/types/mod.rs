@@ -6,10 +6,11 @@
 mod entry;
 mod level_info;
 mod rick;
+pub mod sstable;
 
 pub use entry::{Bytes, Entry, EntryMeta, ThreadId, TimeRange, Timestamp};
 pub use level_info::{LevelDesc, LevelId, LevelInfo};
-pub use rick::{Offset, RickSuperBlock, ValueFormat};
+pub(crate) use rick::{Offset, RickSuperBlock, ValueFormat};
 
 // todo: maybe make a trait `Generated` or sth.
 // contains `encode()`, `decode()`, `to_generated_type()`.
