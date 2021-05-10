@@ -3,13 +3,9 @@ use std::sync::RwLock;
 
 use flatbuffers::FlatBufferBuilder;
 
-use super::{Bytes, Timestamp};
+use super::{Bytes, LevelId, Timestamp};
 use crate::error::Result;
 use crate::file::FileManager;
-
-/// Mono-increase identifier to level files. Starts from 1.
-/// Level id `0` stands for Rick level.
-pub type LevelId = i64;
 
 #[derive(Default, PartialEq, Debug, Clone, Copy)]
 pub struct LevelDesc {

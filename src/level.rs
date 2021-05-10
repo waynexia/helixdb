@@ -1,7 +1,6 @@
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::convert::TryFrom;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,7 +14,7 @@ use tokio::sync::Mutex;
 use crate::cache::{Cache, CacheConfig, KeyCacheEntry, KeyCacheResult};
 use crate::context::Context;
 use crate::error::{HelixError, Result};
-use crate::file::{Rick, SSTable, TableBuilder, VLog, ValueLogBuilder};
+use crate::file::{IndexBlockBuilder, Rick, SSTable, TableBuilder, VLog, ValueLogBuilder};
 use crate::index::MemIndex;
 use crate::types::{Bytes, Entry, LevelId, LevelInfo, ThreadId, TimeRange, Timestamp, ValueFormat};
 
@@ -236,7 +235,8 @@ impl Levels {
                         .file_manager
                         .open_sstable(self.tid, level_id)
                         .await?;
-                    let handle = SSTable::new(table_file, self.tid, level_id)
+                    let handle = SSTable::open(table_file)
+                        .await?
                         .handle(self.ctx.clone())
                         .await?;
 
@@ -282,15 +282,14 @@ impl Levels {
     ///
     /// todo: how to handle rick file is not fully covered by given time range?.
     async fn compact(&self, range: TimeRange, level_id: LevelId) -> Result<()> {
-        let mut table_builder = TableBuilder::from(
+        let mut table_builder = TableBuilder::begin(
+            self.tid,
+            level_id,
             self.ctx
                 .file_manager
                 .open_sstable(self.tid, level_id)
                 .await?,
         );
-        let vlog_builder = self.ctx.file_manager.open_vlog(self.tid, level_id).await?;
-        let mut vlog_builder = ValueLogBuilder::try_from(vlog_builder)?;
-        let mut value_positions = vec![];
 
         // make entry_map (from memindex)
         let offsets = self.memindex.lock().await.load_time_range(range);
@@ -307,21 +306,36 @@ impl Levels {
             pair_list.push((timestamp, value));
         }
 
-        // call compress_fn to compact points.
-        let mut keys = Vec::with_capacity(entry_map.len());
+        // prepare output files.
+        let mut index_bb = IndexBlockBuilder::new();
+        let rick = self.ctx.file_manager.open_vlog(self.tid, level_id).await?;
+        let mut rick = Rick::open(rick, Some(ValueFormat::CompressedValue)).await?;
+
+        // call compress_fn to compact points, build rick file and index block.
         for (key, ts_value) in entry_map {
+            debug_assert_eq!(false, ts_value.is_empty());
+            let first_ts = ts_value[0].0;
+
             let compressed_data = self
                 .ctx
                 .fn_registry
                 .compress_entries(key.clone(), ts_value)?;
 
-            let (offset, size) = vlog_builder.add_entry(compressed_data).await?;
-            value_positions.push((offset, size));
-            keys.push(key);
+            // todo: add rick builder
+            let mut position = rick
+                .append(vec![Entry {
+                    timestamp: first_ts,
+                    key,
+                    value: compressed_data,
+                }])
+                .await?;
+            let (timestamp, key, offset) = position.pop().unwrap();
+            index_bb.add_entry(&key, timestamp, offset);
         }
 
         // make sstable
-        table_builder.add_entries(keys, value_positions);
+        // table_builder.add_entries(keys, value_positions);
+        table_builder.add_block(index_bb);
         table_builder.finish().await?;
 
         // todo: gc rick

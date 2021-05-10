@@ -7,6 +7,9 @@ use flatbuffers::FlatBufferBuilder;
 pub type Bytes = Vec<u8>;
 pub type Timestamp = i64;
 pub type ThreadId = u64;
+/// Mono-increase identifier to level files. Starts from 1.
+/// Level id `0` stands for Rick level.
+pub type LevelId = u64;
 
 /// Wrapper struct over protos::Entry.
 ///

@@ -8,8 +8,8 @@ mod level_info;
 mod rick;
 pub mod sstable;
 
-pub use entry::{Bytes, Entry, EntryMeta, ThreadId, TimeRange, Timestamp};
-pub use level_info::{LevelDesc, LevelId, LevelInfo};
+pub use entry::{Bytes, Entry, EntryMeta, LevelId, ThreadId, TimeRange, Timestamp};
+pub use level_info::{LevelDesc, LevelInfo};
 pub(crate) use rick::{Offset, RickSuperBlock, ValueFormat};
 
 // todo: maybe make a trait `Generated` or sth.

@@ -6,23 +6,33 @@ use std::sync::Arc;
 use crate::context::Context;
 use crate::error::Result;
 use crate::file::VLog;
+use crate::index::MemIndex;
 use crate::io::File;
 use crate::table::{SSTableHandle, TableIterator};
-use crate::types::{Bytes, LevelId, ThreadId, Timestamp};
+use crate::types::sstable::{BlockInfo, BlockType, IndexBlockEntry, SSTableSuperBlock};
+use crate::types::{Bytes, LevelId, Offset, ThreadId, Timestamp};
+use crate::util::{decode_u64, encode_u64};
 
 pub struct SSTable {
     file: File,
-    tid: ThreadId,
-    level_id: LevelId,
+    sb: SSTableSuperBlock,
 }
 
 impl SSTable {
+    #[deprecated]
     pub fn new(file: File, tid: ThreadId, level_id: LevelId) -> Self {
-        Self {
-            file,
-            tid,
-            level_id,
-        }
+        todo!()
+        // Self {
+        //     file,
+        //     tid,
+        //     level_id,
+        // }
+    }
+
+    pub async fn open(file: File) -> Result<Self> {
+        let sb = Self::read_super_block(&file).await?;
+
+        Ok(Self { file, sb })
     }
 
     #[deprecated]
@@ -36,7 +46,11 @@ impl SSTable {
     /// Get read handle of SSTable.
     pub async fn handle(&mut self, ctx: Arc<Context>) -> Result<SSTableHandle> {
         let (index, raw_entry_positions) = self.read_table().await?;
-        let vlog = VLog::from(ctx.file_manager.open_vlog(self.tid, self.level_id).await?);
+        let vlog = VLog::from(
+            ctx.file_manager
+                .open_vlog(self.sb.thread_id, self.sb.level_id)
+                .await?,
+        );
 
         Ok(SSTableHandle::new(
             ctx,
@@ -55,7 +69,11 @@ impl SSTable {
     // todo: fix clippy needless_lifetimes?
     pub async fn iterator<'ctx>(&mut self, ctx: &'ctx Context) -> Result<TableIterator<'ctx>> {
         let (index, raw_entry_positions) = self.read_table().await?;
-        let vlog = VLog::from(ctx.file_manager.open_vlog(self.tid, self.level_id).await?);
+        let vlog = VLog::from(
+            ctx.file_manager
+                .open_vlog(self.sb.thread_id, self.sb.level_id)
+                .await?,
+        );
 
         TableIterator::try_new(index, raw_entry_positions, self.metadata()?, ctx, vlog).await
     }
@@ -63,6 +81,7 @@ impl SSTable {
     // todo: remove this temp method.
     /// out-param: index, raw_entry_positions.
     #[allow(clippy::type_complexity)]
+    #[deprecated]
     async fn read_table(&mut self) -> Result<(HashMap<Bytes, usize>, Vec<(Bytes, u64, u64)>)> {
         let mut table_index = HashMap::new();
         const PREFIX_LENGTH: usize = 3 * size_of::<u64>();
@@ -104,18 +123,67 @@ impl SSTable {
 
         Ok((table_index, raw_entry_positions))
     }
+
+    async fn load_index_block(&self) -> Result<MemIndex> {
+        // let index_block_bytes = self.
+        todo!()
+    }
+
+    /// Read super block from the first 4KB block of file.
+    /// And if file is empty a new super block will be created.
+    // todo: duplicate code with `Rick::read_super_block()`
+    async fn read_super_block(file: &File) -> Result<SSTableSuperBlock> {
+        // check whether super block exist.
+        let file_length = file.size().await?;
+        if file_length == 0 {
+            // create super block and write it to file.
+            let sb = SSTableSuperBlock {
+                // todo: which default value?
+                thread_id: 0,
+                level_id: 0,
+                blocks: vec![],
+            };
+
+            let buf = sb.encode();
+            file.write(buf, 0).await?;
+
+            Ok(sb)
+        } else {
+            // otherwise read from head.
+            let buf = file.read(0, SSTableSuperBlock::Length as u64).await?;
+            let sb = SSTableSuperBlock::decode(&buf);
+
+            Ok(sb)
+        }
+    }
 }
 
 pub struct TableBuilder {
+    thread_id: ThreadId,
+    level_id: LevelId,
     file: File,
-    entry_buffer: Bytes,
+    block_buffer: Bytes,
+    blocks: Vec<BlockInfo>,
+    tail_offset: Offset,
 }
 
-// todo: need to load the whole sstable file to read?
 impl TableBuilder {
+    /// Start to build table.
+    pub fn begin(thread_id: ThreadId, level_id: LevelId, file: File) -> Self {
+        Self {
+            thread_id,
+            level_id,
+            file,
+            block_buffer: vec![],
+            blocks: vec![],
+            tail_offset: 0,
+        }
+    }
+
     /// in-params: key, [(offset, size),]
     ///
     /// format: | value offset (u64) | value size (u64) | key size (u64) | key |
+    #[deprecated]
     pub fn add_entries(&mut self, keys: Vec<Bytes>, offsets: Vec<(u64, u64)>) {
         let mut entries = Vec::with_capacity(keys.len());
         for (mut key, (offset, size)) in keys.into_iter().zip(offsets.into_iter()) {
@@ -129,16 +197,36 @@ impl TableBuilder {
             entries.append(&mut bytes);
         }
 
-        self.entry_buffer.append(&mut entries);
+        self.block_buffer.append(&mut entries);
+    }
+
+    pub fn add_block(&mut self, block_builder: impl BlockBuilder) {
+        let (block_type, block_data) = block_builder.finish();
+
+        let block_size = block_data.len() as u64;
+        self.blocks.push(BlockInfo {
+            block_type,
+            offset: self.tail_offset,
+            length: block_size,
+        });
+        self.tail_offset += block_size;
     }
 
     /// Consume this builder to build a SSTable.
     pub async fn finish(self) -> Result<()> {
-        // write data block
-        let data_block_size = self.entry_buffer.len() as u64;
-        self.file.write(self.entry_buffer, 0).await?;
+        // write super block
+        let sb = SSTableSuperBlock {
+            thread_id: self.thread_id,
+            level_id: self.level_id,
+            blocks: self.blocks,
+        };
+        self.file.write(sb.encode(), 0).await?;
 
-        // todo: other blocks
+        // write other blocks
+        // todo: finish this in one write req
+        self.file
+            .write(self.block_buffer, SSTableSuperBlock::Length as u64)
+            .await?;
 
         self.file.sync().await?;
 
@@ -146,12 +234,42 @@ impl TableBuilder {
     }
 }
 
-impl From<File> for TableBuilder {
-    fn from(file: File) -> Self {
+pub trait BlockBuilder {
+    fn finish(self) -> (BlockType, Bytes);
+}
+
+pub struct IndexBlockBuilder {
+    entry_buffer: Bytes,
+}
+
+impl IndexBlockBuilder {
+    pub fn new() -> Self {
         Self {
-            file,
             entry_buffer: vec![],
         }
+    }
+
+    pub fn from_memindex() -> Self {
+        todo!()
+    }
+
+    pub fn add_entry(&mut self, key: &Bytes, timestamp: Timestamp, offset: Offset) {
+        let index_entry = IndexBlockEntry {
+            value_offset: offset,
+            timestamp,
+            key: key.to_owned(),
+        };
+        let mut entry_bytes = index_entry.encode();
+        let bytes_len = entry_bytes.len() as u64;
+
+        self.entry_buffer.append(&mut encode_u64(bytes_len));
+        self.entry_buffer.append(&mut entry_bytes);
+    }
+}
+
+impl BlockBuilder for IndexBlockBuilder {
+    fn finish(self) -> (BlockType, Bytes) {
+        (BlockType::IndexBlock, self.entry_buffer)
     }
 }
 
@@ -192,18 +310,19 @@ mod test {
                 fn_registry: FnRegistry::new_noop(),
             });
             let mut table_builder =
-                TableBuilder::from(ctx.file_manager.open_sstable(1, 1).await.unwrap());
+                TableBuilder::begin(1, 1, ctx.file_manager.open_sstable(1, 1).await.unwrap());
 
             let keys = vec![b"key1".to_vec(), b"key2key2".to_vec(), b"key333".to_vec()];
             let offsets = vec![(1, 1), (2, 2), (3, 3)];
             table_builder.add_entries(keys.clone(), offsets.clone());
             table_builder.finish().await.unwrap();
 
-            let table_handle =
-                SSTable::new(ctx.file_manager.open_sstable(1, 1).await.unwrap(), 1, 1)
-                    .handle(ctx)
-                    .await
-                    .unwrap();
+            let table_handle = SSTable::open(ctx.file_manager.open_sstable(1, 1).await.unwrap())
+                .await
+                .unwrap()
+                .handle(ctx)
+                .await
+                .unwrap();
 
             for (key, offset) in keys.into_iter().zip(offsets.into_iter()) {
                 assert_eq!(table_handle.get_raw(&key).unwrap(), offset);

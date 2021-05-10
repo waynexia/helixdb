@@ -57,6 +57,7 @@ impl Rick {
     ///
     /// Once this method return, this `append` operation is considered finished on rick file.
     /// Even if it crashed before returned indices are persist.
+    // todo: is it necessary to return inserted timestamp and key?
     pub async fn append(&mut self, entries: Vec<Entry>) -> Result<Vec<(Timestamp, Bytes, u64)>> {
         let mut positions = Vec::with_capacity(entries.len());
         let file_length = self.sb.legal_offset_end;

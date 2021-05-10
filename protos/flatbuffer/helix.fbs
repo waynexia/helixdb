@@ -16,8 +16,12 @@ struct TimeRange {
     end: Timestamp;
 }
 
+struct ThreadId{
+    id: uint64;
+}
+
 struct LevelId {
-    id: long;
+    id: uint64;
 }
 
 struct LevelDesc {
@@ -58,6 +62,8 @@ struct BlockInfo {
 }
 
 table SSTableSuperBlock {
+    thread_id: ThreadId;
+    level_id: LevelId;
     blocks: [BlockInfo];
 }
 

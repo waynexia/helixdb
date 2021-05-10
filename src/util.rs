@@ -1,9 +1,10 @@
 use std::borrow::Borrow;
 use std::cmp::Ordering;
+use std::convert::TryInto;
 use std::marker::PhantomData;
 use std::ops::Index;
 
-use crate::types::Entry;
+use crate::types::{Bytes, Entry};
 
 // todo: rename this.
 pub(crate) trait KeyExtractor<T: Borrow<Self>>: Eq {
@@ -64,4 +65,12 @@ impl Comparator for NoOrderComparator {
     fn cmp(_: &[u8], _: &[u8]) -> Ordering {
         Ordering::Equal
     }
+}
+
+pub fn encode_u64(data: u64) -> Bytes {
+    data.to_le_bytes().to_vec()
+}
+
+pub fn decode_u64(data: &[u8]) -> u64 {
+    u64::from_le_bytes(data.try_into().unwrap())
 }

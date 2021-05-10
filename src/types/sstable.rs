@@ -1,15 +1,15 @@
 use flatbuffers::FlatBufferBuilder;
 
-use super::{Bytes, Offset, Timestamp};
+use super::{Bytes, LevelId, Offset, ThreadId, Timestamp};
 
 /// Enumeration of blocks' type
 pub type BlockType = protos::BlockType;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct BlockInfo {
-    block_type: BlockType,
-    offset: Offset,
-    length: u64,
+    pub block_type: BlockType,
+    pub offset: Offset,
+    pub length: u64,
 }
 
 impl BlockInfo {
@@ -33,7 +33,9 @@ impl From<protos::BlockInfo> for BlockInfo {
 /// Will be padded to 4096 bytes.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct SSTableSuperBlock {
-    blocks: Vec<BlockInfo>,
+    pub thread_id: ThreadId,
+    pub level_id: LevelId,
+    pub blocks: Vec<BlockInfo>,
 }
 
 impl SSTableSuperBlock {
@@ -42,6 +44,8 @@ impl SSTableSuperBlock {
     pub fn encode(&self) -> Bytes {
         let mut fbb = FlatBufferBuilder::new();
 
+        let thread_id = protos::ThreadId::new(self.thread_id);
+        let level_id = protos::LevelId::new(self.level_id);
         fbb.start_vector::<protos::BlockInfo>(self.blocks.len());
         for info in &self.blocks {
             fbb.push(info.to_generated_type());
@@ -50,6 +54,8 @@ impl SSTableSuperBlock {
         let blocks = protos::SSTableSuperBlock::create(
             &mut fbb,
             &protos::SSTableSuperBlockArgs {
+                thread_id: Some(&thread_id),
+                level_id: Some(&level_id),
                 blocks: Some(blocks),
             },
         );
@@ -67,10 +73,16 @@ impl SSTableSuperBlock {
 
     pub fn decode(bytes: &[u8]) -> Self {
         if bytes.is_empty() {
-            return Self { blocks: vec![] };
+            return Self {
+                blocks: vec![],
+                thread_id: 0,
+                level_id: 0,
+            };
         }
 
         let fb_blocks = flatbuffers::get_root::<protos::SSTableSuperBlock<'_>>(bytes);
+        let thread_id = fb_blocks.thread_id().unwrap().id();
+        let level_id = fb_blocks.level_id().unwrap().id();
         let blocks = fb_blocks
             .blocks()
             .unwrap()
@@ -79,15 +91,19 @@ impl SSTableSuperBlock {
             .map(BlockInfo::from)
             .collect();
 
-        Self { blocks }
+        Self {
+            thread_id,
+            level_id,
+            blocks,
+        }
     }
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct IndexBlockEntry {
-    value_offset: Offset,
-    timestamp: Timestamp,
-    key: Bytes,
+    pub value_offset: Offset,
+    pub timestamp: Timestamp,
+    pub key: Bytes,
 }
 
 impl IndexBlockEntry {
@@ -134,6 +150,8 @@ mod test {
             length: 10240,
         };
         let sb = SSTableSuperBlock {
+            thread_id: 3,
+            level_id: 5,
             blocks: vec![block_info],
         };
 

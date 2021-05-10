@@ -7,6 +7,7 @@
 #![feature(btree_retain)]
 #![feature(new_uninit)]
 
+#[deprecated]
 mod blocks;
 mod cache;
 mod context;
