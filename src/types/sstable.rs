@@ -5,7 +5,7 @@ use super::{Bytes, LevelId, Offset, ThreadId, Timestamp};
 /// Enumeration of blocks' type
 pub type BlockType = protos::BlockType;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub(crate) struct BlockInfo {
     pub block_type: BlockType,
     pub offset: Offset,
@@ -96,6 +96,19 @@ impl SSTableSuperBlock {
             level_id,
             blocks,
         }
+    }
+
+    /// Get blocks info of given block type. There may have many blocks with
+    /// the same types (but not tested yet. this is a todo).
+    pub fn get_block_info(&self, block_type: BlockType) -> Vec<BlockInfo> {
+        let mut result = vec![];
+        for block in &self.blocks {
+            if block.block_type == block_type {
+                result.push(block.clone());
+            }
+        }
+
+        result
     }
 }
 

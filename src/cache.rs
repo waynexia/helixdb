@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use lru::LruCache;
 
-use crate::table::{SSTableHandle, TableIdentifier};
+use crate::table::{TableIdentifier, TableReadHandle};
 use crate::types::{Bytes, LevelId, ThreadId, Timestamp};
 
 pub struct CacheConfig {
@@ -42,7 +42,7 @@ impl Default for CacheConfig {
 /// As the total space for caching is limited, cache small and frequent (or hot) is better.
 pub struct Cache {
     config: CacheConfig,
-    handle_cache: RefCell<LruCache<TableIdentifier, Rc<SSTableHandle>>>,
+    handle_cache: RefCell<LruCache<TableIdentifier, Rc<TableReadHandle>>>,
 
     kv_cache: RefCell<LruCache<(Timestamp, Bytes), Bytes>>,
     kc_cache: RefCell<LruCache<(Timestamp, Bytes), Bytes>>,
@@ -62,11 +62,11 @@ impl Cache {
         }
     }
 
-    pub fn get_table_handle(&self, table_id: &TableIdentifier) -> Option<Rc<SSTableHandle>> {
+    pub fn get_table_handle(&self, table_id: &TableIdentifier) -> Option<Rc<TableReadHandle>> {
         self.handle_cache.borrow_mut().get(table_id).cloned()
     }
 
-    pub fn put_table_handle(&self, table_id: TableIdentifier, handle: Rc<SSTableHandle>) {
+    pub fn put_table_handle(&self, table_id: TableIdentifier, handle: Rc<TableReadHandle>) {
         self.handle_cache.borrow_mut().put(table_id, handle);
     }
 

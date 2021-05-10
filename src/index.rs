@@ -1,13 +1,13 @@
 use std::collections::{btree_map, BTreeMap, HashMap};
-use std::ops::{Add, AddAssign};
+use std::ops::AddAssign;
 
 use crate::error::Result;
-use crate::types::{Bytes, TimeRange, Timestamp};
+use crate::types::{Bytes, Offset, TimeRange, Timestamp};
 
 #[derive(Default, Debug)]
 pub struct MemIndex {
     /// (timestamp, key) => value's position in rick file.
-    pub index: BTreeMap<(Timestamp, Bytes), u64>,
+    pub index: BTreeMap<(Timestamp, Bytes), Offset>,
     /// Counting user key.
     pub user_keys: HashMap<Bytes, usize>,
 }
@@ -28,6 +28,14 @@ impl MemIndex {
         result
     }
 
+    pub fn insert(&mut self, entry: (Timestamp, Bytes, u64)) -> Result<()> {
+        let (timestamp, key, value) = entry;
+        self.update_user_key(&key);
+        self.index.insert((timestamp, key), value);
+
+        Ok(())
+    }
+
     pub fn insert_entries(&mut self, entries: Vec<(Timestamp, Bytes, u64)>) -> Result<()> {
         for entry in entries {
             let (timestamp, key, value) = entry;
@@ -38,7 +46,7 @@ impl MemIndex {
         Ok(())
     }
 
-    pub fn get(&self, time_key: &(Timestamp, Bytes)) -> Result<Option<u64>> {
+    pub fn get(&self, time_key: &(Timestamp, Bytes)) -> Result<Option<Offset>> {
         Ok(self.index.get(time_key).copied())
     }
 

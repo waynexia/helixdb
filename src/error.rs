@@ -1,4 +1,4 @@
-use std::io;
+use std::{io, num};
 
 use thiserror::Error;
 
@@ -26,4 +26,6 @@ pub enum HelixError {
     // todo: review this usage.
     #[error("Internal channel disconnected")]
     Disconnected(#[from] tokio::sync::mpsc::error::SendError<Vec<Entry>>),
+    #[error("Incompatible length or size, expect {0}, got {1}")]
+    IncompatibleLength(usize, usize),
 }

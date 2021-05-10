@@ -1,17 +1,14 @@
-use std::collections::HashMap;
-use std::convert::TryInto;
-use std::mem::size_of;
 use std::sync::Arc;
 
 use crate::context::Context;
-use crate::error::Result;
-use crate::file::VLog;
+use crate::error::{HelixError, Result};
+use crate::file::Rick;
 use crate::index::MemIndex;
 use crate::io::File;
-use crate::table::{SSTableHandle, TableIterator};
+use crate::table::TableReadHandle;
 use crate::types::sstable::{BlockInfo, BlockType, IndexBlockEntry, SSTableSuperBlock};
 use crate::types::{Bytes, LevelId, Offset, ThreadId, Timestamp};
-use crate::util::{decode_u64, encode_u64};
+use crate::util::{check_bytes_length, decode_u64, encode_u64};
 
 pub struct SSTable {
     file: File,
@@ -19,114 +16,37 @@ pub struct SSTable {
 }
 
 impl SSTable {
-    #[deprecated]
-    pub fn new(file: File, tid: ThreadId, level_id: LevelId) -> Self {
-        todo!()
-        // Self {
-        //     file,
-        //     tid,
-        //     level_id,
-        // }
-    }
-
     pub async fn open(file: File) -> Result<Self> {
         let sb = Self::read_super_block(&file).await?;
 
         Ok(Self { file, sb })
     }
 
-    #[deprecated]
-    pub fn metadata(&self) -> Result<TableMeta> {
-        Ok(TableMeta {
-            start_timestamp: 0,
-            end_timestamp: 0,
-        })
-    }
-
-    /// Get read handle of SSTable.
-    pub async fn handle(&mut self, ctx: Arc<Context>) -> Result<SSTableHandle> {
-        let (index, raw_entry_positions) = self.read_table().await?;
-        let vlog = VLog::from(
-            ctx.file_manager
-                .open_vlog(self.sb.thread_id, self.sb.level_id)
-                .await?,
-        );
-
-        Ok(SSTableHandle::new(
-            ctx,
-            index,
-            raw_entry_positions,
-            vlog,
-            self.metadata()?,
-        ))
-    }
-
-    /// Construct a iterator on SSTable.
-    ///
-    /// Todo: use trait in std::iter.
-    ///
-    /// Todo: avoid read all data?
-    // todo: fix clippy needless_lifetimes?
-    pub async fn iterator<'ctx>(&mut self, ctx: &'ctx Context) -> Result<TableIterator<'ctx>> {
-        let (index, raw_entry_positions) = self.read_table().await?;
-        let vlog = VLog::from(
-            ctx.file_manager
-                .open_vlog(self.sb.thread_id, self.sb.level_id)
-                .await?,
-        );
-
-        TableIterator::try_new(index, raw_entry_positions, self.metadata()?, ctx, vlog).await
-    }
-
-    // todo: remove this temp method.
-    /// out-param: index, raw_entry_positions.
-    #[allow(clippy::type_complexity)]
-    #[deprecated]
-    async fn read_table(&mut self) -> Result<(HashMap<Bytes, usize>, Vec<(Bytes, u64, u64)>)> {
-        let mut table_index = HashMap::new();
-        const PREFIX_LENGTH: usize = 3 * size_of::<u64>();
-        const PREFIX_UNIT_LENGTH: usize = size_of::<u64>();
-
-        // get data block size
-        let data_block_size = self.file.size().await?;
-
-        // make key-value index
-        let mut raw_entry_positions = vec![];
-        let contents = self.file.read(0, data_block_size).await?;
-        let mut index = 0;
-
-        loop {
-            let prefix_buf = &contents[index..index + PREFIX_LENGTH];
-            index += PREFIX_LENGTH;
-            let value_offset =
-                u64::from_le_bytes(prefix_buf[0..PREFIX_UNIT_LENGTH].try_into().unwrap());
-            let value_size = u64::from_le_bytes(
-                prefix_buf[PREFIX_UNIT_LENGTH..PREFIX_UNIT_LENGTH * 2]
-                    .try_into()
-                    .unwrap(),
-            );
-            let key_length = u64::from_le_bytes(
-                prefix_buf[PREFIX_UNIT_LENGTH * 2..PREFIX_UNIT_LENGTH * 3]
-                    .try_into()
-                    .unwrap(),
-            ) as usize;
-
-            let key_buf = contents[index..index + key_length].to_owned();
-            index += key_length;
-            table_index.insert(key_buf.clone(), raw_entry_positions.len());
-            raw_entry_positions.push((key_buf, value_offset, value_size));
-
-            if index >= data_block_size as usize {
-                break;
-            }
+    pub async fn into_read_handle(self, ctx: Arc<Context>) -> Result<TableReadHandle> {
+        // read index block
+        let index_blocks = self.sb.get_block_info(BlockType::IndexBlock);
+        if index_blocks.is_empty() {
+            return Err(HelixError::NotFound);
         }
+        let mut indices = vec![];
+        for block in index_blocks {
+            let block_buf = self.file.read(block.offset, block.length).await?;
+            check_bytes_length(&block_buf, block.length as usize)?;
+            let memindex = IndexBlockReader::read(block_buf)?;
+            indices.push(memindex);
+        }
+        // todo: merge multi mem-indices
+        let memindex = indices.pop().unwrap();
 
-        Ok((table_index, raw_entry_positions))
-    }
+        // open rick file
+        let rick_file = ctx
+            .file_manager
+            .open_vlog(self.sb.thread_id, self.sb.level_id)
+            .await?;
+        let rick = Rick::open(rick_file, None).await?;
 
-    async fn load_index_block(&self) -> Result<MemIndex> {
-        // let index_block_bytes = self.
-        todo!()
+        let handle = TableReadHandle::new(memindex, self, rick, ctx);
+        Ok(handle)
     }
 
     /// Read super block from the first 4KB block of file.
@@ -176,32 +96,12 @@ impl TableBuilder {
             file,
             block_buffer: vec![],
             blocks: vec![],
-            tail_offset: 0,
+            tail_offset: SSTableSuperBlock::Length as u64,
         }
-    }
-
-    /// in-params: key, [(offset, size),]
-    ///
-    /// format: | value offset (u64) | value size (u64) | key size (u64) | key |
-    #[deprecated]
-    pub fn add_entries(&mut self, keys: Vec<Bytes>, offsets: Vec<(u64, u64)>) {
-        let mut entries = Vec::with_capacity(keys.len());
-        for (mut key, (offset, size)) in keys.into_iter().zip(offsets.into_iter()) {
-            let mut bytes = vec![];
-            let key_size = key.len() as u64;
-            bytes.append(&mut offset.to_le_bytes().to_vec());
-            bytes.append(&mut size.to_le_bytes().to_vec());
-            bytes.append(&mut key_size.to_le_bytes().to_vec());
-            bytes.append(&mut key);
-
-            entries.append(&mut bytes);
-        }
-
-        self.block_buffer.append(&mut entries);
     }
 
     pub fn add_block(&mut self, block_builder: impl BlockBuilder) {
-        let (block_type, block_data) = block_builder.finish();
+        let (block_type, mut block_data) = block_builder.finish();
 
         let block_size = block_data.len() as u64;
         self.blocks.push(BlockInfo {
@@ -209,6 +109,7 @@ impl TableBuilder {
             offset: self.tail_offset,
             length: block_size,
         });
+        self.block_buffer.append(&mut block_data);
         self.tail_offset += block_size;
     }
 
@@ -222,6 +123,10 @@ impl TableBuilder {
         };
         self.file.write(sb.encode(), 0).await?;
 
+        debug_assert_eq!(
+            self.block_buffer.len(),
+            self.tail_offset as usize - SSTableSuperBlock::Length
+        );
         // write other blocks
         // todo: finish this in one write req
         self.file
@@ -273,20 +178,40 @@ impl BlockBuilder for IndexBlockBuilder {
     }
 }
 
-#[deprecated]
-#[derive(Debug)]
-pub struct TableMeta {
-    start_timestamp: Timestamp,
-    end_timestamp: Timestamp,
+pub trait BlockReader {
+    type Output;
+
+    fn read(_: Bytes) -> Result<Self::Output>;
 }
 
-impl TableMeta {
-    pub fn start(&self) -> Timestamp {
-        self.start_timestamp
-    }
+pub struct IndexBlockReader {}
 
-    pub fn end(&self) -> Timestamp {
-        self.end_timestamp
+impl BlockReader for IndexBlockReader {
+    type Output = MemIndex;
+
+    fn read(mut data: Bytes) -> Result<MemIndex> {
+        let mut memindex = MemIndex::default();
+
+        // todo: benchmark this
+        while !data.is_empty() {
+            // read length
+            let length_buf: Vec<_> = data.drain(..std::mem::size_of::<u64>()).collect();
+            check_bytes_length(&length_buf, std::mem::size_of::<u64>())?;
+            let length = decode_u64(&length_buf) as usize;
+
+            // read index entry
+            let data_buf: Vec<_> = data.drain(..length).collect();
+            check_bytes_length(&data_buf, length)?;
+            let index_entry = IndexBlockEntry::decode(&data_buf);
+
+            memindex.insert((
+                index_entry.timestamp,
+                index_entry.key,
+                index_entry.value_offset,
+            ))?;
+        }
+
+        Ok(memindex)
     }
 }
 
@@ -300,6 +225,24 @@ mod test {
     use crate::fn_registry::FnRegistry;
 
     #[test]
+    fn index_block_builder_and_reader() {
+        let ex = LocalExecutor::default();
+        ex.run(async {
+            let mut builder = IndexBlockBuilder::new();
+
+            builder.add_entry(&b"key1".to_vec(), 1, 3);
+            builder.add_entry(&b"key2".to_vec(), 1, 10);
+
+            let (block_type, bytes) = builder.finish();
+            assert_eq!(BlockType::IndexBlock, block_type);
+
+            let memindex = IndexBlockReader::read(bytes).unwrap();
+            assert_eq!(memindex.get(&(1, b"key1".to_vec())).unwrap(), Some(3));
+            assert_eq!(memindex.get(&(1, b"key2".to_vec())).unwrap(), Some(10));
+        });
+    }
+
+    #[test]
     fn simple_table_builder() {
         let ex = LocalExecutor::default();
         ex.run(async {
@@ -311,23 +254,39 @@ mod test {
             });
             let mut table_builder =
                 TableBuilder::begin(1, 1, ctx.file_manager.open_sstable(1, 1).await.unwrap());
+            let mut index_bb = IndexBlockBuilder::new();
 
-            let keys = vec![b"key1".to_vec(), b"key2key2".to_vec(), b"key333".to_vec()];
-            let offsets = vec![(1, 1), (2, 2), (3, 3)];
-            table_builder.add_entries(keys.clone(), offsets.clone());
+            let indices = vec![
+                (b"key1".to_vec(), 1, 1),
+                (b"key2key2".to_vec(), 2, 2),
+                (b"key333".to_vec(), 3, 3),
+            ];
+
+            for index in &indices {
+                index_bb.add_entry(&index.0, index.1, index.2);
+            }
+            table_builder.add_block(index_bb);
             table_builder.finish().await.unwrap();
 
             let table_handle = SSTable::open(ctx.file_manager.open_sstable(1, 1).await.unwrap())
                 .await
                 .unwrap()
-                .handle(ctx)
+                .into_read_handle(ctx)
                 .await
                 .unwrap();
 
-            for (key, offset) in keys.into_iter().zip(offsets.into_iter()) {
-                assert_eq!(table_handle.get_raw(&key).unwrap(), offset);
+            for index in indices {
+                assert_eq!(
+                    table_handle.get_offset(&(index.1, index.0)).unwrap(),
+                    Some(index.2)
+                );
             }
-            assert_eq!(table_handle.get_raw(&b"not exist".to_vec()), None);
+            assert_eq!(
+                table_handle
+                    .get_offset(&(233, b"not exist".to_vec()))
+                    .unwrap(),
+                None
+            );
         });
     }
 }

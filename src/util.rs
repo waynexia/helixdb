@@ -4,6 +4,7 @@ use std::convert::TryInto;
 use std::marker::PhantomData;
 use std::ops::Index;
 
+use crate::error::{HelixError, Result};
 use crate::types::{Bytes, Entry};
 
 // todo: rename this.
@@ -73,4 +74,13 @@ pub fn encode_u64(data: u64) -> Bytes {
 
 pub fn decode_u64(data: &[u8]) -> u64 {
     u64::from_le_bytes(data.try_into().unwrap())
+}
+
+/// Check the length of data. Return `HelixError::IncompatibleLength`
+pub fn check_bytes_length(data: &[u8], length: usize) -> Result<()> {
+    if data.len() == length {
+        Ok(())
+    } else {
+        Err(HelixError::IncompatibleLength(length, data.len()))
+    }
 }

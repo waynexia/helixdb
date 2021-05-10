@@ -237,7 +237,7 @@ impl Levels {
                         .await?;
                     let handle = SSTable::open(table_file)
                         .await?
-                        .handle(self.ctx.clone())
+                        .into_read_handle(self.ctx.clone())
                         .await?;
 
                     let handle = Rc::new(handle);
