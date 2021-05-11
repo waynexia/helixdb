@@ -14,7 +14,7 @@ use tokio::sync::Mutex;
 use crate::cache::{Cache, CacheConfig, KeyCacheEntry, KeyCacheResult};
 use crate::context::Context;
 use crate::error::{HelixError, Result};
-use crate::file::{IndexBlockBuilder, Rick, SSTable, TableBuilder, VLog, ValueLogBuilder};
+use crate::file::{IndexBlockBuilder, Rick, SSTable, TableBuilder};
 use crate::index::MemIndex;
 use crate::types::{Bytes, Entry, LevelId, LevelInfo, ThreadId, TimeRange, Timestamp, ValueFormat};
 
@@ -155,7 +155,7 @@ impl Levels {
         Ok(None)
     }
 
-    // todo: refine
+    // todo: refine, split
     #[inline]
     async fn get_from_table(
         &self,
@@ -173,53 +173,37 @@ impl Levels {
                 }))
             }
             KeyCacheResult::Compressed(compressed) => {
-                let entries = self
-                    .ctx
-                    .fn_registry
-                    .decompress_entries(&time_key.1, &compressed)?;
-
-                let index = match entries
-                    .binary_search_by_key(&time_key.0, |(ts, _)| *ts)
-                    .ok()
-                {
+                let value = match self.decompress_and_find(time_key, &compressed)? {
                     Some(thing) => thing,
                     None => return Ok(None),
                 };
-                let (timestamp, value) = &entries[index];
-                key_cache_entry.value = Some(value);
+
+                key_cache_entry.value = Some(&value);
                 key_cache_entry.compressed = Some(&compressed);
                 self.cache.put_key(key_cache_entry);
 
                 Ok(Some(Entry {
-                    timestamp: *timestamp,
+                    timestamp: time_key.0,
                     key: time_key.1.clone(),
                     value: value.clone(),
                 }))
             }
-            KeyCacheResult::Position(tid, level_id, offset, size) => {
-                let vlog = VLog::from(self.ctx.file_manager.open_vlog(tid, level_id).await?);
-                let raw_bytes = vlog.get(offset as u64, size as u64).await?;
+            KeyCacheResult::Position(tid, level_id, offset) => {
+                let rick_file = self.ctx.file_manager.open_vlog(tid, level_id).await?;
+                let rick = Rick::open(rick_file, None).await?;
+                let raw_bytes = rick.read(offset as u64).await?;
 
-                let entries = self
-                    .ctx
-                    .fn_registry
-                    .decompress_entries(&time_key.1, &raw_bytes)?;
-
-                let index = match entries
-                    .binary_search_by_key(&time_key.0, |(ts, _)| *ts)
-                    .ok()
-                {
+                let value = match self.decompress_and_find(time_key, &raw_bytes.value)? {
                     Some(thing) => thing,
                     None => return Ok(None),
                 };
-                let (timestamp, value) = &entries[index];
 
-                key_cache_entry.value = Some(value);
-                key_cache_entry.compressed = Some(&raw_bytes);
+                key_cache_entry.value = Some(&value);
+                key_cache_entry.compressed = Some(&raw_bytes.value);
                 self.cache.put_key(key_cache_entry);
 
                 Ok(Some(Entry {
-                    timestamp: *timestamp,
+                    timestamp: time_key.0,
                     key: time_key.1.clone(),
                     value: value.clone(),
                 }))
@@ -247,11 +231,25 @@ impl Levels {
                 };
 
                 let entry = handle.get(time_key).await?;
-                if let Some(entry) = &entry {
-                    key_cache_entry.value = Some(&entry.value);
-                    self.cache.put_key(key_cache_entry);
+                // update cache
+                if let Some(mut entry) = entry {
+                    if handle.is_compressed() {
+                        let value = match self.decompress_and_find(time_key, &entry.value)? {
+                            Some(thing) => thing,
+                            None => return Ok(None),
+                        };
+                        key_cache_entry.compressed = Some(&entry.value);
+                        self.cache.put_key(key_cache_entry);
+                        entry.value = value;
+                        Ok(Some(entry))
+                    } else {
+                        key_cache_entry.value = Some(&entry.value);
+                        self.cache.put_key(key_cache_entry);
+                        Ok(Some(entry))
+                    }
+                } else {
+                    Ok(None)
                 }
-                Ok(entry)
             }
         };
 
@@ -262,6 +260,7 @@ impl Levels {
         for action in actions {
             match action {
                 TimestampAction::Compact(start_ts, end_ts) => {
+                    // update level info
                     let next_level_id = self
                         .level_info
                         .lock()
@@ -310,6 +309,7 @@ impl Levels {
         let mut index_bb = IndexBlockBuilder::new();
         let rick = self.ctx.file_manager.open_vlog(self.tid, level_id).await?;
         let mut rick = Rick::open(rick, Some(ValueFormat::CompressedValue)).await?;
+        rick.set_align_ts(range.start()).await?;
 
         // call compress_fn to compact points, build rick file and index block.
         for (key, ts_value) in entry_map {
@@ -354,6 +354,28 @@ impl Levels {
             .await?;
 
         todo!()
+    }
+
+    fn decompress_and_find(
+        &self,
+        time_key: &(Timestamp, Bytes),
+        raw_bytes: &Bytes,
+    ) -> Result<Option<Bytes>> {
+        let entries = self
+            .ctx
+            .fn_registry
+            .decompress_entries(&time_key.1, &raw_bytes)?;
+
+        let index = match entries
+            .binary_search_by_key(&time_key.0, |(ts, _)| *ts)
+            .ok()
+        {
+            Some(thing) => thing,
+            None => return Ok(None),
+        };
+        let (_, value) = &entries[index];
+
+        Ok(Some(value.clone()))
     }
 }
 

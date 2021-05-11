@@ -1,6 +1,6 @@
 use flatbuffers::FlatBufferBuilder;
 
-use super::Bytes;
+use super::{Bytes, Timestamp};
 
 pub(crate) type Offset = u64;
 
@@ -16,6 +16,8 @@ pub(crate) struct RickSuperBlock {
     pub legal_offset_end: Offset,
     // todo: add `version` and `crc` fields
     pub value_format: ValueFormat,
+    /// Only valid when value format is `CompressedValue`
+    pub align_timestamp: Timestamp,
 }
 
 impl RickSuperBlock {
@@ -26,6 +28,7 @@ impl RickSuperBlock {
 
         let legal_offset_start = protos::Offset::new(self.legal_offset_start);
         let legal_offset_end = protos::Offset::new(self.legal_offset_end);
+        let align_timestamp = protos::Timestamp::new(self.align_timestamp);
 
         let sb = protos::RickSuperBlock::create(
             &mut fbb,
@@ -34,6 +37,7 @@ impl RickSuperBlock {
                 legal_offset_start: Some(&legal_offset_start),
                 legal_offset_end: Some(&legal_offset_end),
                 value_format: self.value_format,
+                align_timestamp: Some(&align_timestamp),
             },
         );
 
@@ -56,6 +60,7 @@ impl RickSuperBlock {
             legal_offset_start: fb_sb.legal_offset_start().unwrap().offset(),
             legal_offset_end: fb_sb.legal_offset_end().unwrap().offset(),
             value_format: fb_sb.value_format(),
+            align_timestamp: fb_sb.align_timestamp().unwrap().timestamp(),
         }
     }
 }
@@ -71,6 +76,7 @@ mod test {
             legal_offset_start: 4096,
             legal_offset_end: 8192,
             value_format: ValueFormat::RawValue,
+            align_timestamp: 10086,
         };
 
         let bytes = sb.encode();

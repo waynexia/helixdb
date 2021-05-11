@@ -122,6 +122,14 @@ impl TimeRange {
             end: self.end,
         }
     }
+
+    pub fn start(&self) -> Timestamp {
+        self.start
+    }
+
+    pub fn end(&self) -> Timestamp {
+        self.end
+    }
 }
 
 impl From<(Timestamp, Timestamp)> for TimeRange {

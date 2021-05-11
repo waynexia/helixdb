@@ -47,7 +47,8 @@ pub struct Cache {
     kv_cache: RefCell<LruCache<(Timestamp, Bytes), Bytes>>,
     kc_cache: RefCell<LruCache<(Timestamp, Bytes), Bytes>>,
     // todo: make it a `VLogIdentifier`.
-    kp_cache: RefCell<LruCache<(Timestamp, Bytes), (ThreadId, LevelId, usize, usize)>>,
+    #[allow(clippy::type_complexity)]
+    kp_cache: RefCell<LruCache<(Timestamp, Bytes), (ThreadId, LevelId, usize)>>,
 }
 
 impl Cache {
@@ -76,8 +77,8 @@ impl Cache {
             return KeyCacheResult::Value(value.to_owned());
         } else if let Some(compressed) = self.kc_cache.borrow_mut().get(time_key) {
             return KeyCacheResult::Compressed(compressed.to_owned());
-        } else if let Some((tid, lid, offset, size)) = self.kp_cache.borrow_mut().get(time_key) {
-            return KeyCacheResult::Position(*tid, *lid, *offset, *size);
+        } else if let Some((tid, lid, offset)) = self.kp_cache.borrow_mut().get(time_key) {
+            return KeyCacheResult::Position(*tid, *lid, *offset);
         }
 
         KeyCacheResult::NotFound
@@ -107,7 +108,9 @@ impl Cache {
 pub enum KeyCacheResult {
     Value(Bytes),
     Compressed(Bytes),
-    Position(ThreadId, LevelId, usize, usize),
+    /// Thread id and level id is for constructing rick file's identifier.
+    /// The third `usize` is offset.
+    Position(ThreadId, LevelId, usize),
     NotFound,
 }
 
@@ -116,7 +119,7 @@ pub struct KeyCacheEntry<'a> {
     pub key: &'a (Timestamp, Bytes),
     pub value: Option<&'a Bytes>,
     pub compressed: Option<&'a Bytes>,
-    pub position: Option<(ThreadId, LevelId, usize, usize)>,
+    pub position: Option<(ThreadId, LevelId, usize)>,
 }
 
 impl<'a> KeyCacheEntry<'a> {

@@ -44,21 +44,27 @@ impl TableReadHandle {
     }
 
     pub async fn get(&self, time_key: &(Timestamp, Bytes)) -> Result<Option<Entry>> {
-        if let Some(offset) = self.memindex.get(time_key)? {
-            let _ = self.rick.read(offset).await?;
-            // todo: decompress
-            todo!();
+        let offset = if self.is_compressed() {
+            let mut align_time_key = time_key.clone();
+            align_time_key.0 = self.rick.get_align_ts();
+            self.memindex.get(&align_time_key)?
         } else {
-            // handle compress caused timestamp shift.
-            return Ok(None);
+            self.memindex.get(time_key)?
+        };
+        if let Some(offset) = offset {
+            Ok(Some(self.rick.read(offset).await?))
+        } else {
+            Ok(None)
         }
-
-        Ok(None)
     }
 
     /// Upgrade to writeable handle.
     pub fn upgrade() -> ! {
         todo!()
+    }
+
+    pub fn is_compressed(&self) -> bool {
+        self.rick.is_compressed()
     }
 
     // For test case.

@@ -116,61 +116,8 @@ impl Rick {
         try_join_all(futures).await
     }
 
-    /// Read all keys
-    #[deprecated]
-    pub async fn key_list(&mut self) -> Result<Vec<Bytes>> {
-        let contents = self
-            .file
-            .read(self.start(), self.start() - self.end())
-            .await?;
-        let mut index = 0;
-
-        let mut keys = vec![];
-
-        loop {
-            let prefix_buf = &contents[index..index + EntryMeta::meta_size()];
-            index += EntryMeta::meta_size();
-            let meta = EntryMeta::decode(prefix_buf);
-            let offload_length = meta.length as usize;
-            let offload_buf = &contents[index..index + offload_length];
-            index += offload_length;
-            let entry = Entry::decode(offload_buf);
-            keys.push(entry.key);
-
-            if index >= self.sb.legal_offset_end as usize {
-                break;
-            }
-        }
-
-        Ok(keys)
-    }
-
-    #[deprecated]
-    pub async fn entry_list(&mut self) -> Result<Vec<Entry>> {
-        let contents = self
-            .file
-            .read(self.start(), self.start() - self.end())
-            .await?;
-        let mut index = 0;
-
-        let mut entries = vec![];
-
-        loop {
-            let prefix_buf = &contents[index..index + EntryMeta::meta_size()];
-            index += EntryMeta::meta_size();
-            let meta = EntryMeta::decode(prefix_buf);
-            let offload_length = meta.length as usize;
-            let offload_buf = &contents[index..index + offload_length];
-            index += offload_length;
-            let entry = Entry::decode(offload_buf);
-            entries.push(entry);
-
-            if index >= self.sb.legal_offset_end as usize {
-                break;
-            }
-        }
-
-        Ok(entries)
+    pub fn is_compressed(&self) -> bool {
+        self.sb.value_format == ValueFormat::CompressedValue
     }
 
     /// Scan this rick file and construct its memindex
@@ -254,6 +201,7 @@ impl Rick {
                 legal_offset_end: RickSuperBlock::Length as u64,
                 // todo: make it a parameter.
                 value_format,
+                align_timestamp: 0,
             };
 
             let buf = sb.encode();
@@ -287,6 +235,15 @@ impl Rick {
     #[inline]
     pub fn end(&self) -> Offset {
         self.sb.legal_offset_end
+    }
+
+    pub fn get_align_ts(&self) -> Timestamp {
+        self.sb.align_timestamp
+    }
+
+    pub async fn set_align_ts(&mut self, ts: Timestamp) -> Result<()> {
+        self.sb.align_timestamp = ts;
+        self.sync_super_block().await
     }
 }
 

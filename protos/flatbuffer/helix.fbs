@@ -47,6 +47,7 @@ table RickSuperBlock {
     legal_offset_start: Offset;
     legal_offset_end: Offset;
     value_format: ValueFormat;
+    align_timestamp: Timestamp;
 }
 
 enum BlockType: uint64 {
