@@ -11,3 +11,4 @@ helixdb = { path = "../" }
 tokio = { version = "1.4", features = ["full"] }
 indicatif = "0.15.0"
 clap = "2.33"
+procfs = "0.9.1"

@@ -1,13 +1,9 @@
-use std::convert::TryInto;
-use std::path::Path;
 use std::sync::mpsc::channel;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
 
-use helixdb::option::Options;
-use helixdb::{Entry, FnRegistry, HelixDB, SimpleTimestampReviewer};
-use indicatif::ProgressBar;
+use helixdb::{Entry, HelixDB};
 use tokio::runtime::Builder;
+
+use crate::panel::Panel;
 
 fn generate_entry(timestamp: i64, key: u64, value_size: usize) -> Entry {
     let key = key.to_le_bytes().to_vec();
@@ -21,37 +17,16 @@ fn generate_entry(timestamp: i64, key: u64, value_size: usize) -> Entry {
     }
 }
 
-fn open_db<P: AsRef<Path>>(path: P, num_shard: usize) -> HelixDB {
-    let simple_tsr = SimpleTimestampReviewer::new(1024, 8192);
-    let mut fn_registry = FnRegistry::new_noop();
-    fn_registry.register_sharding_key_fn(Arc::new(move |key| {
-        u64::from_le_bytes(key.to_owned().try_into().unwrap()) as usize % num_shard
-    }));
+pub fn load(helixdb: HelixDB, num_thread: usize, num_entry: usize, value_size: usize) {
+    let mut panel = Panel::with_amount(num_entry as u64);
 
-    let opts = Options::default()
-        .shards(num_shard)
-        .set_timestamp_reviewer(Box::new(simple_tsr))
-        .set_fn_registry(fn_registry);
-
-    HelixDB::open(path, opts)
-}
-
-pub fn load<P: AsRef<Path>>(
-    path: P,
-    num_shard: usize,
-    num_thread: usize,
-    num_entry: usize,
-    value_size: usize,
-) {
-    let helixdb = open_db(path, num_shard);
     let (tx, rx) = channel();
-
-    let bar = ProgressBar::new(num_entry as u64);
     let rt = Builder::new_multi_thread()
         .worker_threads(num_thread)
         .build()
         .unwrap();
-    let begin = Instant::now();
+    // let begin = Instant::now();
+    panel.start();
 
     for key in 0..num_entry as u64 {
         let helixdb = helixdb.clone();
@@ -66,14 +41,13 @@ pub fn load<P: AsRef<Path>>(
     }
 
     for _ in rx.iter().take(num_entry) {
-        bar.inc(1);
+        panel.increase(1);
     }
-    bar.finish();
 
-    let elapsed_us = begin.elapsed().as_micros();
-    println!("elapsed: {:?} us", elapsed_us);
-    println!(
-        "average: {:.2} op/sec",
-        num_entry as f64 / (elapsed_us as f64 / 1_000_000.0)
-    );
+    // let elapsed_us = begin.elapsed().as_micros();
+    // println!("elapsed: {:?} us", elapsed_us);
+    // println!(
+    //     "average: {:.2} op/sec",
+    //     num_entry as f64 / (elapsed_us as f64 / 1_000_000.0)
+    // );
 }
