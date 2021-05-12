@@ -11,6 +11,7 @@ use tokio::sync::Mutex;
 use crate::context::Context;
 use crate::error::Result;
 use crate::level::{Levels, TimestampReviewer};
+use crate::option::ReadOption;
 use crate::types::{Bytes, Entry, ThreadId, TimeRange, Timestamp};
 
 /// A un-Send handle to accept and process requests.
@@ -43,10 +44,10 @@ impl IOWorker {
                     })
                     .detach();
                 }
-                Task::Get(ts, key, tx) => {
+                Task::Get(ts, key, tx, opt) => {
                     let levels = self.levels.clone();
                     GlommioTask::local(async move {
-                        let result = levels.get(&(ts, key)).await;
+                        let result = levels.get(&(ts, key), opt).await;
                         let _ = tx.send(result);
                     })
                     .detach();
@@ -69,7 +70,12 @@ impl IOWorker {
 pub enum Task {
     // todo: add put option
     Put(Vec<Entry>, Notifier<Result<()>>),
-    Get(Timestamp, Bytes, Notifier<Result<Option<Entry>>>),
+    Get(
+        Timestamp,
+        Bytes,
+        Notifier<Result<Option<Entry>>>,
+        ReadOption,
+    ),
     /// time range, start key, end key, result sender, comparator
     Scan(
         TimeRange,

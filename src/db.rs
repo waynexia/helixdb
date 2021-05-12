@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::path::Path;
-use std::rc::Rc;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
@@ -14,15 +13,8 @@ use crate::context::Context;
 use crate::error::Result;
 use crate::file::FileManager;
 use crate::io_worker::{IOWorker, Task};
-use crate::iterator::{
-    Iterator,
-    ScanOption,
-    ShardMuxTimeIterator,
-    ShardTimeIterator,
-    TimeIterator,
-};
-use crate::level::Levels;
-use crate::option::Options;
+use crate::iterator::{Iterator, ShardMuxTimeIterator, ShardTimeIterator, TimeIterator};
+use crate::option::{Options, ReadOption, ScanOption};
 use crate::types::{Bytes, Entry, TimeRange};
 use crate::util::Comparator;
 
@@ -55,8 +47,8 @@ impl HelixDB {
         self.core.put_unchecked(shard_id, write_batch).await
     }
 
-    pub async fn get(&self, timestamp: i64, key: Bytes) -> Result<Option<Entry>> {
-        self.core.sharding_get(timestamp, key).await
+    pub async fn get(&self, timestamp: i64, key: Bytes, opt: ReadOption) -> Result<Option<Entry>> {
+        self.core.sharding_get(timestamp, key, opt).await
     }
 
     pub async fn direct_get(
@@ -64,8 +56,9 @@ impl HelixDB {
         shard_id: usize,
         timestamp: i64,
         key: Bytes,
+        opt: ReadOption,
     ) -> Result<Option<Entry>> {
-        self.core.get_unchecked(shard_id, timestamp, key).await
+        self.core.get_unchecked(shard_id, timestamp, key, opt).await
     }
 
     pub async fn scan<C: Comparator + 'static>(
@@ -151,9 +144,14 @@ impl HelixCore {
         rx.await?
     }
 
-    async fn sharding_get(&self, timestamp: i64, key: Bytes) -> Result<Option<Entry>> {
+    async fn sharding_get(
+        &self,
+        timestamp: i64,
+        key: Bytes,
+        opt: ReadOption,
+    ) -> Result<Option<Entry>> {
         let shard_id = self.ctx.fn_registry.sharding_fn()(&key);
-        self.get_unchecked(shard_id, timestamp, key).await
+        self.get_unchecked(shard_id, timestamp, key, opt).await
     }
 
     /// Get on specified shard without routing.
@@ -162,9 +160,10 @@ impl HelixCore {
         worker: usize,
         timestamp: i64,
         key: Bytes,
+        opt: ReadOption,
     ) -> Result<Option<Entry>> {
         let (tx, rx) = oneshot();
-        let task = Task::Get(timestamp, key, tx);
+        let task = Task::Get(timestamp, key, tx, opt);
 
         self.task_txs[worker].send(task).await?;
 
@@ -181,13 +180,6 @@ impl HelixCore {
             .map(|worker| (worker, key_range.clone()))
             .map(async move |(worker, key_range)| -> Result<_> {
                 let (tx, rx) = bounded_channel(opt.prefetch_buf_size);
-                // let task = Task::Scan(time_range, key_range.0, key_range.1, tx);
-
-                // let level_scan_task = async move |level: Levels| -> Result<()> {
-                //     level
-                //         .scan::<C>(time_range, key_range.0, key_range.1, tx)
-                //         .await
-                // };
 
                 self.task_txs[worker]
                     .send(Task::Scan(
@@ -213,12 +205,6 @@ impl HelixCore {
         self.worker_handle.len()
     }
 }
-
-// async fn async_scan<C: Comparator>(levels: Rc<Levels>) -> Result<()> {
-//     levels
-//         .scan::<C>(time_range, key_range.0, key_range.1, tx)
-//         .await
-// }
 
 impl Drop for HelixCore {
     fn drop(&mut self) {
@@ -248,7 +234,10 @@ mod test {
         };
         db.put(vec![entry.clone()]).await.unwrap();
 
-        let result = db.get(0, b"key".to_vec()).await.unwrap();
+        let result = db
+            .get(0, b"key".to_vec(), ReadOption::default())
+            .await
+            .unwrap();
         assert_eq!(result.unwrap(), entry);
     }
 }

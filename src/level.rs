@@ -16,6 +16,7 @@ use crate::context::Context;
 use crate::error::{HelixError, Result};
 use crate::file::{IndexBlockBuilder, Rick, SSTable, TableBuilder};
 use crate::index::MemIndex;
+use crate::option::ReadOption;
 use crate::types::{Bytes, Entry, LevelId, LevelInfo, ThreadId, TimeRange, Timestamp, ValueFormat};
 
 pub struct LevelConfig {
@@ -104,12 +105,16 @@ impl Levels {
         Ok(())
     }
 
-    pub async fn get(&self, time_key: &(Timestamp, Bytes)) -> Result<Option<Entry>> {
+    pub async fn get(
+        &self,
+        time_key: &(Timestamp, Bytes),
+        opt: ReadOption,
+    ) -> Result<Option<Entry>> {
         let level = self.level_info.lock().await.get_level_id(time_key.0);
         match level {
             None => Ok(None),
             Some(0) => self.get_from_rick(time_key).await,
-            Some(l) => self.get_from_table(time_key, l).await,
+            Some(l) => self.get_from_table(time_key, l, opt).await,
         }
     }
 
@@ -135,7 +140,10 @@ impl Levels {
             let mut time_key = (0, user_key);
             for ts in time_range.range() {
                 time_key.0 = ts;
-                if let Some(entry) = self.get(&time_key).await? {
+                if let Some(entry) = self
+                    .get(&time_key, ReadOption::default().no_decompress())
+                    .await?
+                {
                     sender.send(vec![entry]).await?;
                 };
             }
@@ -161,6 +169,7 @@ impl Levels {
         &self,
         time_key: &(Timestamp, Bytes),
         level_id: LevelId,
+        opt: ReadOption,
     ) -> Result<Option<Entry>> {
         let mut key_cache_entry = KeyCacheEntry::new(time_key);
 
@@ -173,7 +182,7 @@ impl Levels {
                 }))
             }
             KeyCacheResult::Compressed(compressed) => {
-                let value = match self.decompress_and_find(time_key, &compressed)? {
+                let value = match self.decompress_and_find(time_key, &compressed, opt.decompress)? {
                     Some(thing) => thing,
                     None => return Ok(None),
                 };
@@ -193,10 +202,11 @@ impl Levels {
                 let rick = Rick::open(rick_file, None).await?;
                 let raw_bytes = rick.read(offset as u64).await?;
 
-                let value = match self.decompress_and_find(time_key, &raw_bytes.value)? {
-                    Some(thing) => thing,
-                    None => return Ok(None),
-                };
+                let value =
+                    match self.decompress_and_find(time_key, &raw_bytes.value, opt.decompress)? {
+                        Some(thing) => thing,
+                        None => return Ok(None),
+                    };
 
                 key_cache_entry.value = Some(&value);
                 key_cache_entry.compressed = Some(&raw_bytes.value);
@@ -234,7 +244,11 @@ impl Levels {
                 // update cache
                 if let Some(mut entry) = entry {
                     if handle.is_compressed() {
-                        let value = match self.decompress_and_find(time_key, &entry.value)? {
+                        let value = match self.decompress_and_find(
+                            time_key,
+                            &entry.value,
+                            opt.decompress,
+                        )? {
                             Some(thing) => thing,
                             None => return Ok(None),
                         };
@@ -360,7 +374,12 @@ impl Levels {
         &self,
         time_key: &(Timestamp, Bytes),
         raw_bytes: &Bytes,
+        decompress: bool,
     ) -> Result<Option<Bytes>> {
+        if !decompress {
+            return Ok(Some(raw_bytes.to_owned()));
+        }
+
         let entries = self
             .ctx
             .fn_registry
@@ -552,7 +571,6 @@ impl WriteBatch {
 mod test {
     use glommio::LocalExecutor;
     use tempfile::tempdir;
-    use tokio::sync::oneshot::channel as oneshot;
 
     use super::*;
     use crate::file::FileManager;
@@ -606,7 +624,14 @@ mod test {
             levels.put_internal(entries.clone()).await.unwrap();
 
             for entry in entries {
-                assert_eq!(entry, levels.get(entry.time_key()).await.unwrap().unwrap());
+                assert_eq!(
+                    entry,
+                    levels
+                        .get(entry.time_key(), ReadOption::default().no_decompress())
+                        .await
+                        .unwrap()
+                        .unwrap()
+                );
             }
 
             // overwrite a key
@@ -614,7 +639,11 @@ mod test {
             levels.put_internal(vec![new_entry.clone()]).await.unwrap();
             assert_eq!(
                 new_entry,
-                levels.get(new_entry.time_key()).await.unwrap().unwrap()
+                levels
+                    .get(new_entry.time_key(), ReadOption::default().no_decompress())
+                    .await
+                    .unwrap()
+                    .unwrap()
             );
         });
     }
@@ -645,7 +674,10 @@ mod test {
 
             for timestamp in 0..25 {
                 levels
-                    .get(&(timestamp, b"key".to_vec()))
+                    .get(
+                        &(timestamp, b"key".to_vec()),
+                        ReadOption::default().no_decompress(),
+                    )
                     .await
                     .unwrap()
                     .unwrap();

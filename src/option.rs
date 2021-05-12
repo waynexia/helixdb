@@ -1,6 +1,7 @@
 use crate::fn_registry::FnRegistry;
-use crate::level::{SimpleTimestampReviewer, TimestampAction, TimestampReviewer};
+use crate::level::{SimpleTimestampReviewer, TimestampReviewer};
 
+/// Options for opening HelixDB
 pub struct Options {
     // parameters
     /// Number of shards. It is recommended to equal to the number of system processors.
@@ -37,4 +38,29 @@ impl Options {
         self.tsr = tsr;
         self
     }
+}
+
+#[derive(Clone, Copy)]
+pub struct ReadOption {
+    /// Read request will decompress a compressed value then try to find requested timestamp
+    /// if true. Default value: true.
+    pub(crate) decompress: bool,
+}
+
+impl Default for ReadOption {
+    fn default() -> Self {
+        Self { decompress: true }
+    }
+}
+
+impl ReadOption {
+    pub fn no_decompress(mut self) -> Self {
+        self.decompress = false;
+        self
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct ScanOption {
+    pub prefetch_buf_size: usize,
 }

@@ -15,11 +15,6 @@ pub trait Iterator {
     fn is_valid(&self) -> bool;
 }
 
-#[derive(Copy, Clone, Debug)]
-pub struct ScanOption {
-    pub prefetch_buf_size: usize,
-}
-
 /// Iterate over timestamp. i.e, (ts 0, key 1) -> (ts 1, key 1) -> (ts 2, key 1)...
 ///
 /// "Scan" is simulated via `get()`
