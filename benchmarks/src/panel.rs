@@ -29,11 +29,12 @@ impl Panel {
         self.timer = Instant::now();
     }
 
-    pub fn increase(&mut self, delta: u64) {
-        self.bar.inc(delta);
-        self.processed += delta;
+    pub fn observe(&mut self, progress: u64) {
+        // self.bar.inc(delta);
+        self.bar.set_position(progress);
+        // self.processed= progress;
 
-        if self.processed >= self.amount {
+        if progress >= self.amount {
             self.finish();
         }
     }

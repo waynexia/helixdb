@@ -1,4 +1,5 @@
 use std::convert::TryInto;
+use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
@@ -42,9 +43,21 @@ fn main() {
             SubCommand::with_name("fill")
                 .about("Write data")
                 .arg(
-                    Arg::with_name("entries")
-                        .long("entries")
-                        .help("Entries number to fill")
+                    Arg::with_name("batch_size")
+                        .long("batch_size")
+                        .help("batch size of each put request")
+                        .default_value("1024"),
+                )
+                .arg(
+                    Arg::with_name("num_key")
+                        .long("num_key")
+                        .help("Number of different keys to fill")
+                        .default_value("1024"),
+                )
+                .arg(
+                    Arg::with_name("num_timestamp")
+                        .long("num_timestamp")
+                        .help("Number of timestamp per key to fill")
                         .default_value("1024"),
                 )
                 .arg(
@@ -88,13 +101,27 @@ fn main() {
     let num_thread = matches.value_of("thread").unwrap().parse().unwrap();
     let num_shard = matches.value_of("shard").unwrap().parse().unwrap();
     let db = open_helix(dir, num_shard);
+    let guard = pprof::ProfilerGuard::new(100).unwrap();
 
     match matches.subcommand() {
         ("fill", Some(sub_matches)) => {
-            let num_entry = sub_matches.value_of("entries").unwrap().parse().unwrap();
+            let batch_size = sub_matches.value_of("batch_size").unwrap().parse().unwrap();
+            let num_key = sub_matches.value_of("num_key").unwrap().parse().unwrap();
+            let num_timestamp = sub_matches
+                .value_of("num_timestamp")
+                .unwrap()
+                .parse()
+                .unwrap();
             let value_size = sub_matches.value_of("value_size").unwrap().parse().unwrap();
 
-            load(db, num_thread, num_entry, value_size);
+            load(
+                db,
+                num_thread,
+                batch_size,
+                num_key,
+                num_timestamp,
+                value_size,
+            );
         }
 
         ("scan", Some(_)) => scan(dir, num_shard, 10000),
@@ -102,6 +129,11 @@ fn main() {
         _ => unreachable!(),
     }
 
+    // post process
+    if let Ok(report) = guard.report().build() {
+        let file = File::create("flamegraph.svg").unwrap();
+        report.flamegraph(file).unwrap();
+    };
     std::io::stdout().flush().unwrap();
 }
 
@@ -115,7 +147,8 @@ fn open_helix<P: AsRef<Path>>(path: P, num_shard: usize) -> HelixDB {
     let opts = Options::default()
         .shards(num_shard)
         .set_timestamp_reviewer(Box::new(simple_tsr))
-        .set_fn_registry(fn_registry);
+        .set_fn_registry(fn_registry)
+        .set_task_buffer_size(1024);
 
     HelixDB::open(path, opts)
 }
