@@ -38,6 +38,11 @@ impl Options {
         self.tsr = tsr;
         self
     }
+
+    pub fn set_task_buffer_size(mut self, buffer_size: usize) -> Self {
+        self.task_buffer_size = buffer_size;
+        self
+    }
 }
 
 #[derive(Clone, Copy)]

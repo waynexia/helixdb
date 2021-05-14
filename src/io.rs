@@ -56,6 +56,7 @@ impl File {
         Ok(self.0.file_size().await?)
     }
 
+    /// Synchronous operation.
     #[inline]
     pub async fn truncate(&self, size: u64) -> Result<()> {
         self.0.truncate(size).await?;

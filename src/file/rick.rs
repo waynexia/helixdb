@@ -17,6 +17,7 @@ use crate::types::{
     Timestamp,
     ValueFormat,
 };
+use crate::util::check_bytes_length;
 
 /// Handles to entries in rick (level 0).
 ///
@@ -57,6 +58,8 @@ impl Rick {
     ///
     /// Once this method return, this `append` operation is considered finished on rick file.
     /// Even if it crashed before returned indices are persist.
+    ///
+    /// Encoding format: | payload length (u64) | payload |
     // todo: is it necessary to return inserted timestamp and key?
     pub async fn append(&mut self, entries: Vec<Entry>) -> Result<Vec<(Timestamp, Bytes, u64)>> {
         let mut positions = Vec::with_capacity(entries.len());
@@ -95,12 +98,14 @@ impl Rick {
             .file
             .read(offset, EntryMeta::meta_size() as u64)
             .await?;
+        check_bytes_length(&meta_buf, EntryMeta::meta_size())?;
         let meta = EntryMeta::decode(&meta_buf);
 
         let offload_buf = self
             .file
             .read(offset + EntryMeta::meta_size() as u64, meta.length)
             .await?;
+        check_bytes_length(&offload_buf, meta.length as usize)?;
 
         Ok(Entry::decode(&offload_buf))
     }
@@ -124,17 +129,17 @@ impl Rick {
     ///
     /// Generally, Rick file will couple with a persisted index file SSTable.
     /// Except those new ricks that memindex is not flushed to disk yet.
-    pub async fn construct_index(&mut self) -> Result<MemIndex> {
+    pub async fn construct_index(&self) -> Result<MemIndex> {
         let contents = self
             .file
-            .read(self.start(), self.start() - self.end())
+            .read(self.start(), self.end() - self.start())
             .await?;
         let mut index = 0;
 
         let mut indices = BTreeMap::new();
         let mut offset = 0;
 
-        loop {
+        while index < contents.len() {
             let prefix_buf = &contents[index..index + EntryMeta::meta_size()];
             index += EntryMeta::meta_size();
             let meta = EntryMeta::decode(prefix_buf);
@@ -145,10 +150,6 @@ impl Rick {
 
             indices.insert((entry.timestamp, entry.key), offset as u64);
             offset += EntryMeta::meta_size() + offload_length;
-
-            if index >= self.sb.legal_offset_end as usize {
-                break;
-            }
         }
 
         let mem_index = MemIndex::from_existing(indices);
@@ -178,6 +179,11 @@ impl Rick {
         Local::yield_if_needed().await;
 
         todo!()
+    }
+
+    // This is a temporary work around. Should be replaced by `garbage_collect()` above.
+    pub async fn clean(&self) -> Result<()> {
+        self.file.truncate(0).await
     }
 
     /// Read super block from the first 4KB block of file.
@@ -307,6 +313,34 @@ mod test {
 
             let read_entry = rick.read(RickSuperBlock::Length as u64).await.unwrap();
             assert_eq!(entry, read_entry);
+        });
+    }
+
+    #[test]
+    fn reconstruct_memindex() {
+        let ex = LocalExecutor::default();
+
+        ex.run(async {
+            let base_dir = tempdir().unwrap();
+            let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
+            let rick_file = file_manager.open_rick(1).await.unwrap();
+            let mut rick = Rick::open(rick_file, None).await.unwrap();
+
+            let entries = vec![
+                // one key with three timestamps.
+                (1, b"key1".to_vec(), b"value".to_vec()).into(),
+                (2, b"key1".to_vec(), b"value".to_vec()).into(),
+                (3, b"key1".to_vec(), b"value".to_vec()).into(),
+                // overwrote
+                (1, b"key2".to_vec(), b"value1".to_vec()).into(),
+                (1, b"key2".to_vec(), b"value2".to_vec()).into(),
+            ];
+            rick.append(entries.clone()).await.unwrap();
+
+            let memindex = rick.construct_index().await.unwrap();
+
+            assert_eq!(3, *memindex.user_keys.get(&b"key1".to_vec()).unwrap());
+            assert_eq!(1, *memindex.user_keys.get(&b"key2".to_vec()).unwrap());
         });
     }
 }

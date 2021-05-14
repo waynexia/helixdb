@@ -55,6 +55,7 @@ impl Levels {
         let rick_file = ctx.file_manager.open_rick(tid).await?;
         let rick = Rick::open(rick_file, Some(ValueFormat::RawValue)).await?;
         let level_info = ctx.file_manager.open_level_info().await?;
+        let memindex = rick.construct_index().await?;
 
         let cache = Cache::new(CacheConfig::default());
         let write_batch = WriteBatch::new();
@@ -63,8 +64,7 @@ impl Levels {
             tid,
             timestamp_reviewer,
             ctx,
-            // todo: recovery memindex of rick's
-            memindex: Mutex::new(MemIndex::default()),
+            memindex: Mutex::new(memindex),
             rick: Mutex::new(rick),
             level_info: Mutex::new(level_info),
             cache,
@@ -353,7 +353,7 @@ impl Levels {
         table_builder.finish().await?;
 
         // todo: gc rick
-        // self.rick.clean().await?;
+        self.rick.lock().await.clean().await?;
         // todo: gc memindex
         self.memindex.lock().await.purge_time_range(range);
 

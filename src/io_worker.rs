@@ -87,8 +87,9 @@ pub enum Task {
     Shutdown,
 }
 
+// todo: finish this
 impl std::fmt::Debug for Task {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
+        f.debug_struct("HelixTask").finish()
     }
 }
