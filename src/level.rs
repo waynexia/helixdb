@@ -98,6 +98,8 @@ impl Levels {
         let indices = self.rick.lock().await.append(entries).await?;
         self.memindex.lock().await.insert_entries(indices)?;
 
+        // println!("timestamp: {}", max_timestamp);
+
         // review timestamp and handle actions.
         let review_actions = self.timestamp_reviewer.lock().await.observe(max_timestamp);
         self.handle_actions(review_actions).await?;
@@ -272,6 +274,7 @@ impl Levels {
 
     async fn handle_actions(&self, actions: Vec<TimestampAction>) -> Result<()> {
         for action in actions {
+            println!("tid: {}, action: {:?}", self.tid, action);
             match action {
                 TimestampAction::Compact(start_ts, end_ts) => {
                     // update level info
@@ -295,6 +298,8 @@ impl Levels {
     ///
     /// todo: how to handle rick file is not fully covered by given time range?.
     async fn compact(&self, range: TimeRange, level_id: LevelId) -> Result<()> {
+        println!("start compact. range {:?}, level {}", range, level_id);
+
         let mut table_builder = TableBuilder::begin(
             self.tid,
             level_id,
@@ -318,6 +323,8 @@ impl Levels {
             let pair_list: &mut Vec<_> = entry_map.entry(key).or_default();
             pair_list.push((timestamp, value));
         }
+
+        println!("[compact] level {}, make entry map", level_id);
 
         // prepare output files.
         let mut index_bb = IndexBlockBuilder::new();
@@ -347,15 +354,21 @@ impl Levels {
             index_bb.add_entry(&key, timestamp, offset);
         }
 
+        println!("[compact] level {}, build rick", level_id);
+
         // make sstable
         // table_builder.add_entries(keys, value_positions);
         table_builder.add_block(index_bb);
         table_builder.finish().await?;
 
+        println!("[compact] level {}, build table", level_id);
+
         // todo: gc rick
         self.rick.lock().await.clean().await?;
         // todo: gc memindex
         self.memindex.lock().await.purge_time_range(range);
+
+        println!("compact {} finish", level_id);
 
         Ok(())
     }
@@ -484,7 +497,7 @@ impl WriteBatch {
             notifier: RefCell::new(vec![]),
             buf: RefCell::new(vec![]),
             timeout: Duration::from_millis(500),
-            batch_size: 4096,
+            batch_size: 1,
             lock: Mutex::new(()),
             action: RwLock::new(None),
         }

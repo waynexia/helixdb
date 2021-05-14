@@ -112,13 +112,34 @@ impl Rick {
 
     /// Reads offsets.
     // todo: this might be refined by batching io.
-    pub async fn reads(&mut self, offsets: Vec<u64>) -> Result<Vec<Entry>> {
-        let mut futures = Vec::with_capacity(offsets.len());
-        for offset in offsets {
-            futures.push(self.read(offset));
+    pub async fn reads(&mut self, mut offsets: Vec<u64>) -> Result<Vec<Entry>> {
+        // fast pass
+        if offsets.len() < 2 {
+            return match offsets.first() {
+                Some(offset) => Ok(vec![self.read(*offset).await?]),
+                None => Ok(vec![]),
+            };
         }
 
-        try_join_all(futures).await
+        offsets.sort_unstable();
+        let min = *offsets.first().unwrap();
+        let max = offsets.remove(offsets.len() - 1);
+        let bytes = self.file.read(min, max - min).await?;
+        let mut entries_iter = Self::decode_entries(&bytes)?.into_iter().peekable();
+        let mut entries = Vec::with_capacity(offsets.len() + 1);
+
+        // filter decoded entries via given offsets
+        for offset in &offsets {
+            while entries_iter.peek().unwrap().1 + min != *offset {
+                entries_iter.next();
+            }
+            entries.push(entries_iter.next().unwrap().0);
+        }
+
+        // read the last offset
+        entries.push(self.read(max).await?);
+
+        Ok(entries)
     }
 
     pub fn is_compressed(&self) -> bool {
@@ -231,6 +252,29 @@ impl Rick {
         Ok(())
     }
 
+    /// Decode to entries and the offset over input bytes.
+    // todo: let `construct_index()` use this
+    fn decode_entries(contents: &Bytes) -> Result<Vec<(Entry, u64)>> {
+        let mut index = 0;
+        let mut offset = 0;
+        let mut entries = vec![];
+
+        while index < contents.len() {
+            let prefix_buf = &contents[index..index + EntryMeta::meta_size()];
+            index += EntryMeta::meta_size();
+            let meta = EntryMeta::decode(prefix_buf);
+            let offload_length = meta.length as usize;
+            let offload_buf = &contents[index..index + offload_length];
+            index += offload_length;
+            let entry = Entry::decode(offload_buf);
+            entries.push((entry, offset as u64));
+
+            offset += EntryMeta::meta_size() + offload_length;
+        }
+
+        Ok(entries)
+    }
+
     /// Get rick's start offset
     #[inline]
     pub fn start(&self) -> Offset {
@@ -341,6 +385,47 @@ mod test {
 
             assert_eq!(3, *memindex.user_keys.get(&b"key1".to_vec()).unwrap());
             assert_eq!(1, *memindex.user_keys.get(&b"key2".to_vec()).unwrap());
+        });
+    }
+
+    #[test]
+    fn rick_reads_method() {
+        let ex = LocalExecutor::default();
+
+        ex.run(async {
+            let base_dir = tempdir().unwrap();
+            let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
+            let rick_file = file_manager.open_rick(1).await.unwrap();
+            let mut rick = Rick::open(rick_file, None).await.unwrap();
+
+            let mut entries = vec![
+                (1, b"key1".to_vec(), b"value".to_vec()).into(),
+                (2, b"key1".to_vec(), b"value".to_vec()).into(),
+                (3, b"key1".to_vec(), b"value".to_vec()).into(),
+                (1, b"key2".to_vec(), b"value".to_vec()).into(),
+                (2, b"key2".to_vec(), b"value".to_vec()).into(),
+                (3, b"key2".to_vec(), b"value".to_vec()).into(),
+                (1, b"key3".to_vec(), b"value".to_vec()).into(),
+                (2, b"key3".to_vec(), b"value".to_vec()).into(),
+                (3, b"key3".to_vec(), b"value".to_vec()).into(),
+            ];
+            let mut offsets: Vec<u64> = rick
+                .append(entries.clone())
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|item| item.2)
+                .collect();
+
+            // all entries
+            let reads_result = rick.reads(offsets.clone()).await.unwrap();
+            assert_eq!(entries, reads_result);
+
+            // eliminate some in the middle
+            entries.remove(entries.len() / 2);
+            offsets.remove(offsets.len() / 2);
+            let reads_result = rick.reads(offsets.clone()).await.unwrap();
+            assert_eq!(entries, reads_result);
         });
     }
 }
