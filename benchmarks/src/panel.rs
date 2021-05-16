@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use indicatif::ProgressBar;
+use indicatif::{ProgressBar, ProgressStyle};
 use procfs::{diskstats, DiskStat};
 
 pub struct Panel {
@@ -15,6 +15,11 @@ pub struct Panel {
 impl Panel {
     pub fn with_amount(amount: u64) -> Self {
         let bar = ProgressBar::new(amount);
+        bar.set_style(
+            ProgressStyle::default_bar()
+                .template("{prefix:.bold.dim} [{bar:60}] ({pos}/{len}) {msg}")
+                .progress_chars("=> "),
+        );
 
         Self {
             amount,
@@ -30,11 +35,19 @@ impl Panel {
     }
 
     pub fn observe(&mut self, progress: u64) {
-        // self.bar.inc(delta);
-        self.bar.set_position(progress);
-        // self.processed= progress;
+        // self.bar.set_position(progress);
+        self.processed = progress;
 
         if progress >= self.amount {
+            self.finish();
+        }
+    }
+
+    pub fn increase(&mut self, delta: u64) {
+        // self.bar.inc(delta);
+        self.processed += delta;
+
+        if self.processed >= self.amount {
             self.finish();
         }
     }
@@ -45,6 +58,7 @@ impl Panel {
 
     fn finish(&mut self) {
         let elapsed_ms = self.timer.elapsed().as_millis();
+        self.bar.finish_with_message("done");
 
         println!("elapsed: {:?} ms", elapsed_ms);
         println!(
