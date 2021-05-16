@@ -12,6 +12,7 @@ use glommio::Local;
 use tokio::sync::mpsc::Sender as BoundedSender;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::Mutex;
+use tracing::{debug, instrument, trace};
 
 use crate::cache::{Cache, CacheConfig, KeyCacheEntry, KeyCacheResult};
 use crate::context::Context;
@@ -294,7 +295,7 @@ impl Levels {
 
     pub(crate) async fn handle_actions(&self, actions: Vec<TimestampAction>) -> Result<()> {
         for action in actions {
-            println!("tid: {}, action: {:?}", self.tid, action);
+            debug!("tid: {}, action: {:?}", self.tid, action);
             match action {
                 TimestampAction::Compact(start_ts, end_ts, level_id) => {
                     let level_id = match level_id {
@@ -334,8 +335,12 @@ impl Levels {
     /// Compact entries from rick in [start_ts, end_ts] to next level.
     ///
     /// todo: how to handle rick file is not fully covered by given time range?.
+    #[instrument]
     async fn compact(&self, range: TimeRange, level_id: LevelId) -> Result<()> {
-        println!("start compact. range {:?}, level {}", range, level_id);
+        debug!(
+            "[compact] start compact. range {:?}, level {}",
+            range, level_id
+        );
 
         let mut table_builder = TableBuilder::begin(
             self.tid,
@@ -351,12 +356,13 @@ impl Levels {
         let offsets = memindex.load_time_range(range);
         memindex.purge_time_range(range);
         drop(memindex);
-        println!("[compact] level {}, purge memindex", level_id);
+        trace!("[compact] level {}, purge memindex", level_id);
         let mut rick = self.rick.lock().await;
         let entries = rick.reads(offsets).await?;
         rick.clean().await?;
-        println!("[compact] level {}, rick reads", level_id);
+        trace!("[compact] level {}, rick reads", level_id);
         drop(rick);
+
         let mut entry_map = HashMap::new();
         for entry in entries {
             let Entry {
@@ -369,7 +375,7 @@ impl Levels {
             pair_list.push((timestamp, value));
         }
 
-        println!("[compact] level {}, make entry map", level_id);
+        trace!("[compact] level {}, make entry map", level_id);
 
         // prepare output files.
         let mut index_bb = IndexBlockBuilder::new();
@@ -399,21 +405,21 @@ impl Levels {
             index_bb.add_entry(&key, timestamp, offset);
         }
 
-        println!("[compact] level {}, build rick", level_id);
+        trace!("[compact] level {}, build rick", level_id);
 
         // make sstable
         // table_builder.add_entries(keys, value_positions);
         table_builder.add_block(index_bb);
         table_builder.finish().await?;
 
-        println!("[compact] level {}, build table", level_id);
+        trace!("[compact] level {}, build table", level_id);
 
         // todo: gc rick
         // self.rick.lock().await.clean().await?;
         // todo: gc memindex
         // self.memindex.lock().await.purge_time_range(range);
 
-        println!("compact {} finish", level_id);
+        debug!("compact {} finish", level_id);
 
         Ok(())
     }
@@ -453,6 +459,14 @@ impl Levels {
         let (_, value) = &entries[index];
 
         Ok(Some(value.clone()))
+    }
+}
+
+impl std::fmt::Debug for Levels {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Levels")
+            .field("thread id", &self.tid)
+            .finish()
     }
 }
 
@@ -718,6 +732,12 @@ mod test {
 
     #[test]
     fn put_get_with_compaction() {
+        // use tracing::Level;
+        // use tracing_subscriber;
+        // tracing_subscriber::fmt()
+        //     .with_max_level(Level::TRACE)
+        //     .init();
+
         let ex = LocalExecutor::default();
         ex.run(async {
             let base_dir = tempdir().unwrap();

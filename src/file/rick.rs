@@ -3,6 +3,7 @@ use std::time::Instant;
 use std::usize;
 
 use glommio::Local;
+use tracing::trace;
 
 use crate::error::Result;
 use crate::index::MemIndex;
@@ -122,7 +123,7 @@ impl Rick {
         }
 
         let now = Instant::now();
-        println!("[rick] start reads {} entries", offsets.len());
+        trace!("[rick] start reads {} entries", offsets.len());
 
         offsets.sort_unstable();
         let min = *offsets.first().unwrap();
@@ -131,7 +132,7 @@ impl Rick {
         let mut entries_iter = Self::decode_entries(&bytes)?.into_iter().peekable();
         let mut entries = Vec::with_capacity(offsets.len() + 1);
 
-        println!(
+        trace!(
             "[rick] read and decode takes {:?} ms",
             now.elapsed().as_millis()
         );
@@ -144,7 +145,7 @@ impl Rick {
             entries.push(entries_iter.next().unwrap().0);
         }
 
-        println!("[rick] filter takes {:?} ms", now.elapsed().as_millis());
+        trace!("[rick] filter takes {:?} ms", now.elapsed().as_millis());
 
         // read the last offset
         entries.push(self.read(max).await?);

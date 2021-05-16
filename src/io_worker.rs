@@ -10,6 +10,7 @@ use glommio::Task as GlommioTask;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::oneshot::Sender as Notifier;
 use tokio::sync::Mutex;
+use tracing::trace;
 
 use crate::context::Context;
 use crate::error::Result;
@@ -54,7 +55,7 @@ impl IOWorker {
             let tid = self.tid;
             GlommioTask::local(async move {
                 while let Some(action) = rx.recv().await {
-                    println!("{} received action {:?}", tid, action);
+                    trace!("{} received action {:?}", tid, action);
                     let _ = levels.handle_actions(vec![action]).await;
                 }
             })
