@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
+use std::time::Instant;
 use std::usize;
 
-use futures_util::future::try_join_all;
 use glommio::Local;
 
 use crate::error::Result;
@@ -121,12 +121,20 @@ impl Rick {
             };
         }
 
+        let now = Instant::now();
+        println!("[rick] start reads {} entries", offsets.len());
+
         offsets.sort_unstable();
         let min = *offsets.first().unwrap();
         let max = offsets.remove(offsets.len() - 1);
         let bytes = self.file.read(min, max - min).await?;
         let mut entries_iter = Self::decode_entries(&bytes)?.into_iter().peekable();
         let mut entries = Vec::with_capacity(offsets.len() + 1);
+
+        println!(
+            "[rick] read and decode takes {:?} ms",
+            now.elapsed().as_millis()
+        );
 
         // filter decoded entries via given offsets
         for offset in &offsets {
@@ -135,6 +143,8 @@ impl Rick {
             }
             entries.push(entries_iter.next().unwrap().0);
         }
+
+        println!("[rick] filter takes {:?} ms", now.elapsed().as_millis());
 
         // read the last offset
         entries.push(self.read(max).await?);
@@ -203,8 +213,10 @@ impl Rick {
     }
 
     // This is a temporary work around. Should be replaced by `garbage_collect()` above.
-    pub async fn clean(&self) -> Result<()> {
-        self.file.truncate(0).await
+    pub async fn clean(&mut self) -> Result<()> {
+        // mark as illegal
+        self.sb.legal_offset_start = self.sb.legal_offset_end;
+        self.sync_super_block().await
     }
 
     /// Read super block from the first 4KB block of file.

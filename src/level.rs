@@ -5,8 +5,10 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
+use glommio::channels::channel_mesh::Senders as ChannelMeshSender;
 use glommio::sync::RwLock;
 use glommio::timer::TimerActionOnce;
+use glommio::Local;
 use tokio::sync::mpsc::Sender as BoundedSender;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::Mutex;
@@ -44,6 +46,7 @@ pub(crate) struct Levels {
     level_info: Mutex<LevelInfo>,
     cache: Cache,
     write_batch: Rc<WriteBatch>,
+    ts_action_sender: ChannelMeshSender<TimestampAction>,
 }
 
 impl Levels {
@@ -51,6 +54,7 @@ impl Levels {
         tid: ThreadId,
         timestamp_reviewer: Arc<Mutex<Box<dyn TimestampReviewer>>>,
         ctx: Arc<Context>,
+        ts_action_sender: ChannelMeshSender<TimestampAction>,
     ) -> Result<Rc<Self>> {
         let rick_file = ctx.file_manager.open_rick(tid).await?;
         let rick = Rick::open(rick_file, Some(ValueFormat::RawValue)).await?;
@@ -69,6 +73,7 @@ impl Levels {
             level_info: Mutex::new(level_info),
             cache,
             write_batch: Rc::new(write_batch),
+            ts_action_sender,
         };
 
         let levels = Rc::new(levels);
@@ -98,11 +103,11 @@ impl Levels {
         let indices = self.rick.lock().await.append(entries).await?;
         self.memindex.lock().await.insert_entries(indices)?;
 
-        // println!("timestamp: {}", max_timestamp);
-
         // review timestamp and handle actions.
         let review_actions = self.timestamp_reviewer.lock().await.observe(max_timestamp);
-        self.handle_actions(review_actions).await?;
+        self.handle_actions(review_actions.clone()).await?;
+
+        Local::yield_if_needed().await;
 
         Ok(())
     }
@@ -272,22 +277,54 @@ impl Levels {
         entry
     }
 
-    async fn handle_actions(&self, actions: Vec<TimestampAction>) -> Result<()> {
+    /// Propagate action to other peers.
+    async fn propagate_action(&self, action: TimestampAction) -> Result<()> {
+        for consumer_id in 0..self.ts_action_sender.nr_consumers() {
+            if consumer_id != self.ts_action_sender.peer_id() {
+                self.ts_action_sender
+                    .send_to(consumer_id, action)
+                    .await
+                    // todo: check this unwrap
+                    .unwrap();
+            }
+        }
+
+        Ok(())
+    }
+
+    pub(crate) async fn handle_actions(&self, actions: Vec<TimestampAction>) -> Result<()> {
         for action in actions {
             println!("tid: {}, action: {:?}", self.tid, action);
             match action {
-                TimestampAction::Compact(start_ts, end_ts) => {
-                    // update level info
-                    let next_level_id = self
-                        .level_info
-                        .lock()
-                        .await
-                        .add_level(start_ts, end_ts, &self.ctx.file_manager)
-                        .await?;
-                    self.compact(TimeRange::from((start_ts, end_ts)), next_level_id)
+                TimestampAction::Compact(start_ts, end_ts, level_id) => {
+                    let level_id = match level_id {
+                        Some(id) => id,
+                        None => {
+                            // fetch new level id and update level info
+                            let level_id = self
+                                .level_info
+                                .lock()
+                                .await
+                                .add_level(start_ts, end_ts, &self.ctx.file_manager)
+                                .await?;
+                            // propagate
+                            self.propagate_action(TimestampAction::Compact(
+                                start_ts,
+                                end_ts,
+                                Some(level_id),
+                            ))
+                            .await?;
+
+                            level_id
+                        }
+                    };
+                    self.compact(TimeRange::from((start_ts, end_ts)), level_id)
                         .await?;
                 }
-                TimestampAction::Outdate(_) => self.outdate().await?,
+                TimestampAction::Outdate(_) => {
+                    self.propagate_action(action).await?;
+                    self.outdate().await?
+                }
             }
         }
 
@@ -309,9 +346,17 @@ impl Levels {
                 .await?,
         );
 
-        // make entry_map (from memindex)
-        let offsets = self.memindex.lock().await.load_time_range(range);
-        let entries = self.rick.lock().await.reads(offsets).await?;
+        // make entry_map (from memindex) and purge
+        let mut memindex = self.memindex.lock().await;
+        let offsets = memindex.load_time_range(range);
+        memindex.purge_time_range(range);
+        drop(memindex);
+        println!("[compact] level {}, purge memindex", level_id);
+        let mut rick = self.rick.lock().await;
+        let entries = rick.reads(offsets).await?;
+        rick.clean().await?;
+        println!("[compact] level {}, rick reads", level_id);
+        drop(rick);
         let mut entry_map = HashMap::new();
         for entry in entries {
             let Entry {
@@ -364,9 +409,9 @@ impl Levels {
         println!("[compact] level {}, build table", level_id);
 
         // todo: gc rick
-        self.rick.lock().await.clean().await?;
+        // self.rick.lock().await.clean().await?;
         // todo: gc memindex
-        self.memindex.lock().await.purge_time_range(range);
+        // self.memindex.lock().await.purge_time_range(range);
 
         println!("compact {} finish", level_id);
 
@@ -419,10 +464,12 @@ pub trait TimestampReviewer: Send + Sync {
 }
 
 /// Actions given by [TimestampReviewer].
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum TimestampAction {
     /// Compact data between two timestamps (both inclusive).
-    Compact(Timestamp, Timestamp),
+    /// The third parameter is the id of new level. This field is filled by the
+    /// peer who observed this original "compact action" (sent by `TimestampReviewer`).
+    Compact(Timestamp, Timestamp, Option<LevelId>),
     /// Outdate data which timestamp is smaller than given.
     Outdate(Timestamp),
 }
@@ -463,7 +510,11 @@ impl TimestampReviewer for SimpleTimestampReviewer {
     fn observe(&mut self, timestamp: Timestamp) -> Vec<TimestampAction> {
         let mut actions = vec![];
         if timestamp - self.last_compacted + 1 >= self.rick_range {
-            actions.push(TimestampAction::Compact(self.last_compacted, timestamp));
+            actions.push(TimestampAction::Compact(
+                self.last_compacted,
+                timestamp,
+                None,
+            ));
             self.last_compacted = timestamp + 1;
         }
         if timestamp - self.last_outdated + 1 >= self.outdate_range {
@@ -582,6 +633,7 @@ impl WriteBatch {
 
 #[cfg(test)]
 mod test {
+    use glommio::channels::channel_mesh::MeshBuilder;
     use glommio::LocalExecutor;
     use tempfile::tempdir;
 
@@ -595,11 +647,11 @@ mod test {
 
         let mut actions = vec![];
         let expected = vec![
-            TimestampAction::Compact(0, 9),
-            TimestampAction::Compact(10, 19),
-            TimestampAction::Compact(20, 29),
+            TimestampAction::Compact(0, 9, None),
+            TimestampAction::Compact(10, 19, None),
+            TimestampAction::Compact(20, 29, None),
             TimestampAction::Outdate(9),
-            TimestampAction::Compact(30, 39),
+            TimestampAction::Compact(30, 39, None),
             TimestampAction::Outdate(19),
         ];
 
@@ -623,7 +675,10 @@ mod test {
             });
             let timestamp_reviewer: Arc<Mutex<Box<dyn TimestampReviewer>>> =
                 Arc::new(Mutex::new(Box::new(SimpleTimestampReviewer::new(10, 30))));
-            let levels = Levels::try_new(1, timestamp_reviewer, ctx).await.unwrap();
+            let sender = MeshBuilder::full(1, 1).join().await.unwrap().0;
+            let levels = Levels::try_new(1, timestamp_reviewer, ctx, sender)
+                .await
+                .unwrap();
 
             let entries = vec![
                 (1, b"key1".to_vec(), b"value1".to_vec()).into(),
@@ -674,7 +729,8 @@ mod test {
             });
             let timestamp_reviewer: Arc<Mutex<Box<dyn TimestampReviewer>>> =
                 Arc::new(Mutex::new(Box::new(SimpleTimestampReviewer::new(10, 30))));
-            let levels = Levels::try_new(1, timestamp_reviewer, ctx.clone())
+            let sender = MeshBuilder::full(1, 1).join().await.unwrap().0;
+            let levels = Levels::try_new(1, timestamp_reviewer, ctx.clone(), sender)
                 .await
                 .unwrap();
 

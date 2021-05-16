@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 
 use futures_util::future::try_join_all;
+use glommio::channels::channel_mesh::MeshBuilder;
 use glommio::LocalExecutorBuilder;
 use tokio::sync::mpsc::{channel as bounded_channel, Sender};
 use tokio::sync::oneshot::channel as oneshot;
@@ -92,16 +93,20 @@ impl HelixCore {
 
         let mut worker_handle = Vec::with_capacity(opts.num_shard);
         let mut task_txs = Vec::with_capacity(opts.num_shard);
+        let mesh_builder = MeshBuilder::full(opts.num_shard, CHANNEL_MESH_SIZE);
+
         for tid in 0..opts.num_shard as u64 {
             let tsr = tsr.clone();
             let ctx = ctx.clone();
             let (tx, rx) = bounded_channel(opts.task_buffer_size);
+            let mesh_builder = mesh_builder.clone();
 
             let handle = LocalExecutorBuilder::new()
                 .pin_to_cpu(tid as usize)
                 .spawn(move || async move {
-                    let worker = IOWorker::try_new(tid, tsr, ctx).await.unwrap();
-                    worker.run(rx).await
+                    let (sender, receiver) = mesh_builder.join().await.unwrap();
+                    let worker = IOWorker::try_new(tid, tsr, ctx, sender).await.unwrap();
+                    worker.run(rx, receiver).await
                 })
                 .unwrap();
 
