@@ -169,7 +169,7 @@ impl Rick {
         let mut index = 0;
 
         let mut indices = BTreeMap::new();
-        let mut offset = 0;
+        let mut offset = RickSuperBlock::Length;
 
         while index < contents.len() {
             let prefix_buf = &contents[index..index + EntryMeta::meta_size()];
@@ -190,6 +190,12 @@ impl Rick {
 
     pub async fn sync(&self) -> Result<()> {
         self.file.sync().await?;
+
+        Ok(())
+    }
+
+    pub async fn close(self) -> Result<()> {
+        self.file.close().await?;
 
         Ok(())
     }
@@ -388,7 +394,7 @@ mod test {
                 (1, b"key1".to_vec(), b"value".to_vec()).into(),
                 (2, b"key1".to_vec(), b"value".to_vec()).into(),
                 (3, b"key1".to_vec(), b"value".to_vec()).into(),
-                // overwrote
+                // overwrite
                 (1, b"key2".to_vec(), b"value1".to_vec()).into(),
                 (1, b"key2".to_vec(), b"value2".to_vec()).into(),
             ];
@@ -398,6 +404,10 @@ mod test {
 
             assert_eq!(3, *memindex.user_keys.get(&b"key1".to_vec()).unwrap());
             assert_eq!(1, *memindex.user_keys.get(&b"key2".to_vec()).unwrap());
+
+            for index in memindex.into_iter() {
+                rick.read(index.1).await.unwrap();
+            }
         });
     }
 

@@ -63,4 +63,11 @@ impl File {
 
         Ok(())
     }
+
+    #[inline]
+    pub async fn close(self) -> Result<()> {
+        self.0.close().await?;
+
+        Ok(())
+    }
 }

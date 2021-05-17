@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use tracing::error;
+
 use crate::context::Context;
 use crate::error::{HelixError, Result};
 use crate::file::Rick;
@@ -26,6 +28,7 @@ impl SSTable {
         // read index block
         let index_blocks = self.sb.get_block_info(BlockType::IndexBlock);
         if index_blocks.is_empty() {
+            error!("index block is empty");
             return Err(HelixError::NotFound);
         }
         let mut indices = vec![];
@@ -134,6 +137,7 @@ impl TableBuilder {
             .await?;
 
         self.file.sync().await?;
+        self.file.close().await?;
 
         Ok(())
     }

@@ -181,13 +181,15 @@ impl Levels {
     ) -> Result<Option<Entry>> {
         let mut key_cache_entry = KeyCacheEntry::new(time_key);
 
-        let entry = match self.cache.get_key(time_key) {
+        let cache_result = self.cache.get_key(time_key);
+        trace!("cache result of {:?} : {:?}", time_key, cache_result);
+        let entry = match cache_result {
             KeyCacheResult::Value(value) => {
                 return Ok(Some(Entry {
                     timestamp: time_key.0,
                     key: time_key.1.to_owned(),
                     value,
-                }))
+                }));
             }
             KeyCacheResult::Compressed(compressed) => {
                 let value = match self.decompress_and_find(time_key, &compressed, opt.decompress)? {
@@ -404,6 +406,7 @@ impl Levels {
             let (timestamp, key, offset) = position.pop().unwrap();
             index_bb.add_entry(&key, timestamp, offset);
         }
+        rick.close().await?;
 
         trace!("[compact] level {}, build rick", level_id);
 
@@ -444,11 +447,13 @@ impl Levels {
             return Ok(Some(raw_bytes.to_owned()));
         }
 
-        let entries = self
+        let mut entries = self
             .ctx
             .fn_registry
             .decompress_entries(&time_key.1, &raw_bytes)?;
 
+        // todo: move this logic to UDCF
+        entries.sort_by_key(|e| e.0);
         let index = match entries
             .binary_search_by_key(&time_key.0, |(ts, _)| *ts)
             .ok()

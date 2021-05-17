@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::fmt::Debug;
 use std::rc::Rc;
 
 use lru::LruCache;
@@ -112,6 +113,19 @@ pub enum KeyCacheResult {
     /// The third `usize` is offset.
     Position(ThreadId, LevelId, usize),
     NotFound,
+}
+
+impl Debug for KeyCacheResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut f = f.debug_struct("KeyCacheResult");
+        match self {
+            KeyCacheResult::Value(bytes) => f.field("Value", &bytes.len()),
+            KeyCacheResult::Compressed(bytes) => f.field("Compressed", &bytes.len()),
+            KeyCacheResult::Position(tid, lid, offset) => f.field("Position", &(tid, lid, offset)),
+            KeyCacheResult::NotFound => f.field("NotFound", &()),
+        };
+        f.finish()
+    }
 }
 
 /// For inserting Key into cache.
