@@ -60,5 +60,6 @@ pub fn load(
         if progress >= total_entry as u64 {
             break;
         }
+        std::thread::sleep(std::time::Duration::from_millis(100));
     }
 }
