@@ -169,7 +169,7 @@ impl Rick {
         let mut index = 0;
 
         let mut indices = BTreeMap::new();
-        let mut offset = RickSuperBlock::Length;
+        let mut offset = RickSuperBlock::LENGTH;
 
         while index < contents.len() {
             let prefix_buf = &contents[index..index + EntryMeta::meta_size()];
@@ -243,8 +243,8 @@ impl Rick {
             let sb = RickSuperBlock {
                 // todo: make it a parameter.
                 is_ordered: false,
-                legal_offset_start: RickSuperBlock::Length as u64,
-                legal_offset_end: RickSuperBlock::Length as u64,
+                legal_offset_start: RickSuperBlock::LENGTH as u64,
+                legal_offset_end: RickSuperBlock::LENGTH as u64,
                 // todo: make it a parameter.
                 value_format,
                 align_timestamp: 0,
@@ -256,7 +256,7 @@ impl Rick {
             Ok(sb)
         } else {
             // otherwise read from head.
-            let buf = file.read(0, RickSuperBlock::Length as u64).await?;
+            let buf = file.read(0, RickSuperBlock::LENGTH as u64).await?;
             let sb = RickSuperBlock::decode(&buf);
 
             Ok(sb)
@@ -273,7 +273,7 @@ impl Rick {
 
     /// Decode to entries and the offset over input bytes.
     // todo: let `construct_index()` use this
-    fn decode_entries(contents: &Bytes) -> Result<Vec<(Entry, u64)>> {
+    fn decode_entries(contents: &[u8]) -> Result<Vec<(Entry, u64)>> {
         let mut index = 0;
         let mut offset = 0;
         let mut entries = vec![];
@@ -334,8 +334,8 @@ mod test {
             let rick_file = file_manager.open_rick(1).await.unwrap();
             let mut rick = Rick::open(rick_file, None).await.unwrap();
 
-            assert_eq!(RickSuperBlock::Length, rick.start() as usize);
-            assert_eq!(RickSuperBlock::Length, rick.end() as usize);
+            assert_eq!(RickSuperBlock::LENGTH, rick.start() as usize);
+            assert_eq!(RickSuperBlock::LENGTH, rick.end() as usize);
 
             // write something
             let entry = Entry {
@@ -345,14 +345,14 @@ mod test {
             };
             rick.append(vec![entry.clone()]).await.unwrap();
             let new_rick_end = rick.end();
-            assert_ne!(RickSuperBlock::Length, rick.end() as usize);
+            assert_ne!(RickSuperBlock::LENGTH, rick.end() as usize);
 
             // close and open again
             drop(rick);
             let rick_file = file_manager.open_rick(1).await.unwrap();
             let rick = Rick::open(rick_file, None).await.unwrap();
 
-            assert_eq!(RickSuperBlock::Length, rick.start() as usize);
+            assert_eq!(RickSuperBlock::LENGTH, rick.start() as usize);
             assert_eq!(new_rick_end, rick.end());
         });
     }
@@ -374,7 +374,7 @@ mod test {
             };
             rick.append(vec![entry.clone()]).await.unwrap();
 
-            let read_entry = rick.read(RickSuperBlock::Length as u64).await.unwrap();
+            let read_entry = rick.read(RickSuperBlock::LENGTH as u64).await.unwrap();
             assert_eq!(entry, read_entry);
         });
     }

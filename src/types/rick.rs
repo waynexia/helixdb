@@ -21,7 +21,7 @@ pub(crate) struct RickSuperBlock {
 }
 
 impl RickSuperBlock {
-    pub const Length: usize = 4096;
+    pub const LENGTH: usize = 4096;
 
     pub fn encode(&self) -> Bytes {
         let mut fbb = FlatBufferBuilder::new();
@@ -45,10 +45,10 @@ impl RickSuperBlock {
         let mut padding_bytes = fbb.finished_data().to_vec();
 
         // the un-padding bytes should shorter than 4096 otherwise it will be truncated.
-        debug_assert_eq!(true, padding_bytes.len() <= Self::Length);
+        debug_assert_eq!(true, padding_bytes.len() <= Self::LENGTH);
         // padding it. Flatbuffers has the information about payload's length, so tailing
         // zero doesn't matter.
-        padding_bytes.resize(Self::Length, 0);
+        padding_bytes.resize(Self::LENGTH, 0);
         padding_bytes
     }
 
@@ -80,7 +80,7 @@ mod test {
         };
 
         let bytes = sb.encode();
-        assert_eq!(bytes.len(), RickSuperBlock::Length);
+        assert_eq!(bytes.len(), RickSuperBlock::LENGTH);
         assert_eq!(sb, RickSuperBlock::decode(&bytes));
     }
 }

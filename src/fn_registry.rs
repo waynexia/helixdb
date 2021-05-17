@@ -13,7 +13,7 @@ pub type CompressFn = Arc<dyn Fn(Bytes, Vec<(Timestamp, Bytes)>) -> Bytes + Send
 
 /// The inputs are key and compressed bytes.
 /// Output is [(timestamp, values),]
-pub type DecompressFn = Arc<dyn Fn(Bytes, &Bytes) -> Vec<(Timestamp, Bytes)> + Send + Sync>;
+pub type DecompressFn = Arc<dyn Fn(Bytes, &[u8]) -> Vec<(Timestamp, Bytes)> + Send + Sync>;
 
 /// `UDCF` stands for "User Defined Compress Function".
 /// Includes compress and decompress implementation.
@@ -46,7 +46,7 @@ impl UDCF {
 /// Determine compress function based on key.
 ///
 /// This will be called on each key that going to be compressed.
-pub type CompressDispatchFn = Arc<dyn Fn(&Bytes) -> &str + Send + Sync>;
+pub type CompressDispatchFn = Arc<dyn Fn(&[u8]) -> &str + Send + Sync>;
 
 /// Dispatch key to different shards. Called "sharding a key".
 ///
@@ -105,7 +105,7 @@ impl FnRegistry {
         Ok(compress_fn(key.clone(), data))
     }
 
-    pub fn decompress_entries(&self, key: &Bytes, data: &Bytes) -> Result<Vec<(Timestamp, Bytes)>> {
+    pub fn decompress_entries(&self, key: &[u8], data: &[u8]) -> Result<Vec<(Timestamp, Bytes)>> {
         let name = self.dispatch_fn()(key);
         let udcf = self.udcf(name)?;
         Ok(udcf.decompress()(key.to_owned(), data))
@@ -160,7 +160,7 @@ pub fn noop_udcf() -> UDCF {
     const TIMESTAMP_SIZE: usize = std::mem::size_of::<Timestamp>();
     const U64_SIZE: usize = std::mem::size_of::<u64>();
     let decompress_fn: DecompressFn = Arc::new(|_key, raw_values| {
-        let mut raw_values: VecDeque<u8> = raw_values.clone().into();
+        let mut raw_values: VecDeque<u8> = raw_values.iter().cloned().collect();
         let mut len = raw_values.len();
 
         // decode `N`

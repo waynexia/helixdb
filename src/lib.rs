@@ -6,6 +6,9 @@
 #![feature(async_closure)]
 #![feature(btree_retain)]
 #![feature(new_uninit)]
+// todo: open these lints
+#![allow(dead_code)]
+#![allow(unused_variables)]
 
 #[deprecated]
 mod blocks;

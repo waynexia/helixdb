@@ -1,4 +1,6 @@
-use std::collections::{btree_map, BTreeMap, HashMap};
+#[cfg(test)]
+use std::collections::btree_map;
+use std::collections::{BTreeMap, HashMap};
 use std::ops::AddAssign;
 
 use crate::error::Result;
@@ -50,6 +52,7 @@ impl MemIndex {
         Ok(self.index.get(time_key).copied())
     }
 
+    #[cfg(test)]
     pub fn into_iter(self) -> btree_map::IntoIter<(i64, std::vec::Vec<u8>), u64> {
         self.index.into_iter()
     }
@@ -74,9 +77,9 @@ impl MemIndex {
         self.index.retain(|(ts, _), _| !range.contains(*ts));
     }
 
-    fn update_user_key(&mut self, user_key: &Bytes) {
+    fn update_user_key(&mut self, user_key: &[u8]) {
         if !self.user_keys.contains_key(user_key) {
-            self.user_keys.insert(user_key.clone(), 1);
+            self.user_keys.insert(user_key.to_vec(), 1);
         } else {
             self.user_keys.get_mut(user_key).unwrap().add_assign(1);
         }

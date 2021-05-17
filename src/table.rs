@@ -74,7 +74,7 @@ impl TableReadHandle {
         self.memindex.get(time_key)
     }
 
-    fn decompress_entry(&self, key: &Bytes, data: &Bytes) -> Result<Vec<(Timestamp, Bytes)>> {
+    fn decompress_entry(&self, key: &[u8], data: &[u8]) -> Result<Vec<(Timestamp, Bytes)>> {
         self.ctx.fn_registry.decompress_entries(key, data)
     }
 }

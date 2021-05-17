@@ -440,7 +440,7 @@ impl Levels {
     fn decompress_and_find(
         &self,
         time_key: &(Timestamp, Bytes),
-        raw_bytes: &Bytes,
+        raw_bytes: &[u8],
         decompress: bool,
     ) -> Result<Option<Bytes>> {
         if !decompress {

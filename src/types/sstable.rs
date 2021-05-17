@@ -39,7 +39,7 @@ pub(crate) struct SSTableSuperBlock {
 }
 
 impl SSTableSuperBlock {
-    pub const Length: usize = 4096;
+    pub const LENGTH: usize = 4096;
 
     pub fn encode(&self) -> Bytes {
         let mut fbb = FlatBufferBuilder::new();
@@ -64,10 +64,10 @@ impl SSTableSuperBlock {
         let mut padding_bytes = fbb.finished_data().to_vec();
 
         // the un-padding bytes should shorter than 4096 otherwise it will be truncated.
-        debug_assert_eq!(true, padding_bytes.len() <= Self::Length);
+        debug_assert_eq!(true, padding_bytes.len() <= Self::LENGTH);
         // padding it. Flatbuffers has the information about payload's length, so tailing
         // zero doesn't matter.
-        padding_bytes.resize(Self::Length, 0);
+        padding_bytes.resize(Self::LENGTH, 0);
         padding_bytes
     }
 
@@ -104,7 +104,7 @@ impl SSTableSuperBlock {
         let mut result = vec![];
         for block in &self.blocks {
             if block.block_type == block_type {
-                result.push(block.clone());
+                result.push(*block);
             }
         }
 
@@ -169,7 +169,7 @@ mod test {
         };
 
         let bytes = sb.encode();
-        assert_eq!(bytes.len(), SSTableSuperBlock::Length);
+        assert_eq!(bytes.len(), SSTableSuperBlock::LENGTH);
         assert_eq!(sb, SSTableSuperBlock::decode(&bytes));
     }
 

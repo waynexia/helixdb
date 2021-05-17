@@ -66,7 +66,7 @@ impl LevelInfo {
         fbb.finished_data().to_vec()
     }
 
-    pub fn decode(bytes: &Bytes) -> Self {
+    pub fn decode(bytes: &[u8]) -> Self {
         // for empty level-info file.
         if bytes.is_empty() {
             return Self {

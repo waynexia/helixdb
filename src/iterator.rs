@@ -128,7 +128,8 @@ impl<C: Comparator> ShardMuxTimeIterator<C> {
         }
 
         let next = self.entry_buf.pop().unwrap().data;
-        self.consume_one().await;
+        // todo: check this Result
+        let _ = self.consume_one().await;
 
         Some(next)
     }
@@ -149,7 +150,8 @@ impl<C: Comparator> ShardMuxTimeIterator<C> {
 
         // fill `entry_buf`
         while !self.iters.is_empty() && self.entry_buf.len() < buf_size {
-            self.consume_one().await;
+            // todo: check this Result
+            let _ = self.consume_one().await;
         }
     }
 

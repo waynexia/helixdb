@@ -73,7 +73,7 @@ impl SSTable {
             Ok(sb)
         } else {
             // otherwise read from head.
-            let buf = file.read(0, SSTableSuperBlock::Length as u64).await?;
+            let buf = file.read(0, SSTableSuperBlock::LENGTH as u64).await?;
             let sb = SSTableSuperBlock::decode(&buf);
 
             Ok(sb)
@@ -99,7 +99,7 @@ impl TableBuilder {
             file,
             block_buffer: vec![],
             blocks: vec![],
-            tail_offset: SSTableSuperBlock::Length as u64,
+            tail_offset: SSTableSuperBlock::LENGTH as u64,
         }
     }
 
@@ -128,12 +128,12 @@ impl TableBuilder {
 
         debug_assert_eq!(
             self.block_buffer.len(),
-            self.tail_offset as usize - SSTableSuperBlock::Length
+            self.tail_offset as usize - SSTableSuperBlock::LENGTH
         );
         // write other blocks
         // todo: finish this in one write req
         self.file
-            .write(self.block_buffer, SSTableSuperBlock::Length as u64)
+            .write(self.block_buffer, SSTableSuperBlock::LENGTH as u64)
             .await?;
 
         self.file.sync().await?;
@@ -162,7 +162,7 @@ impl IndexBlockBuilder {
         todo!()
     }
 
-    pub fn add_entry(&mut self, key: &Bytes, timestamp: Timestamp, offset: Offset) {
+    pub fn add_entry(&mut self, key: &[u8], timestamp: Timestamp, offset: Offset) {
         let index_entry = IndexBlockEntry {
             value_offset: offset,
             timestamp,

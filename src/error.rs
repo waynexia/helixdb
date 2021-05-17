@@ -1,4 +1,4 @@
-use std::{io, num};
+use std::io;
 
 use thiserror::Error;
 
