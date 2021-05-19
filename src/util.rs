@@ -60,11 +60,56 @@ impl<O: Comparator, E: KeyExtractor<T>, T: Borrow<E>> From<T> for OrderingHelper
 #[derive(Eq, PartialEq)]
 /// This comparator returns `Ordering::Equal` for every operands.
 /// Which will ignore the provided left and right bound and result a full table scan.
+///
+/// # Example
+/// ```rust
+/// # use std::cmp::Ordering;
+/// # use helixdb::NoOrderComparator;
+/// # use crate::helixdb::Comparator;
+/// assert_eq!(
+///     NoOrderComparator::cmp(&[1, 2, 3], &[2, 3, 3]),
+///     Ordering::Equal
+/// );
+/// assert_eq!(NoOrderComparator::cmp(&[1, 2, 3], &[1, 2]), Ordering::Equal);
+/// assert_eq!(
+///     NoOrderComparator::cmp(&[1, 2, 3], &[1, 2, 3]),
+///     Ordering::Equal
+/// );
+/// ```
 pub struct NoOrderComparator {}
 
 impl Comparator for NoOrderComparator {
     fn cmp(_: &[u8], _: &[u8]) -> Ordering {
         Ordering::Equal
+    }
+}
+
+#[derive(PartialEq, Eq)]
+/// This comparator describes lexicographical order on `[u8]`
+///
+/// # Example
+/// ```rust
+/// # use std::cmp::Ordering;
+/// # use helixdb::LexicalComparator;
+/// # use crate::helixdb::Comparator;
+/// assert_eq!(
+///     LexicalComparator::cmp(&[1, 2, 3], &[2, 3, 3]),
+///     Ordering::Less
+/// );
+/// assert_eq!(
+///     LexicalComparator::cmp(&[1, 2, 3], &[1, 2]),
+///     Ordering::Greater
+/// );
+/// assert_eq!(
+///     LexicalComparator::cmp(&[1, 2, 3], &[1, 2, 3]),
+///     Ordering::Equal
+/// );
+/// ```
+pub struct LexicalComparator {}
+
+impl Comparator for LexicalComparator {
+    fn cmp(lhs: &[u8], rhs: &[u8]) -> Ordering {
+        lhs.cmp(rhs)
     }
 }
 

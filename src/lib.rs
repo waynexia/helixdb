@@ -32,4 +32,4 @@ pub use db::*;
 pub use fn_registry::FnRegistry;
 pub use level::{SimpleTimestampReviewer, TimestampAction, TimestampReviewer};
 pub use types::{Entry, TimeRange};
-pub use util::{Comparator, NoOrderComparator};
+pub use util::{Comparator, LexicalComparator, NoOrderComparator};
