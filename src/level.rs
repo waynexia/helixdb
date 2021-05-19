@@ -44,7 +44,7 @@ pub(crate) struct Levels {
     memindex: Mutex<MemIndex>,
     // todo: use group of ricks to achieve log-rotate/GC
     rick: Mutex<Rick>,
-    level_info: Mutex<LevelInfo>,
+    level_info: Arc<Mutex<LevelInfo>>,
     cache: Cache,
     write_batch: Rc<WriteBatch>,
     ts_action_sender: ChannelMeshSender<TimestampAction>,
@@ -56,10 +56,10 @@ impl Levels {
         timestamp_reviewer: Arc<Mutex<Box<dyn TimestampReviewer>>>,
         ctx: Arc<Context>,
         ts_action_sender: ChannelMeshSender<TimestampAction>,
+        level_info: Arc<Mutex<LevelInfo>>,
     ) -> Result<Rc<Self>> {
         let rick_file = ctx.file_manager.open_rick(tid).await?;
         let rick = Rick::open(rick_file, Some(ValueFormat::RawValue)).await?;
-        let level_info = ctx.file_manager.open_level_info().await?;
         let memindex = rick.construct_index().await?;
 
         let cache = Cache::new(CacheConfig::default());
@@ -71,7 +71,7 @@ impl Levels {
             ctx,
             memindex: Mutex::new(memindex),
             rick: Mutex::new(rick),
-            level_info: Mutex::new(level_info),
+            level_info,
             cache,
             write_batch: Rc::new(write_batch),
             ts_action_sender,
@@ -148,12 +148,9 @@ impl Levels {
             let mut time_key = (0, user_key);
             for ts in time_range.range() {
                 time_key.0 = ts;
-                if let Some(entry) = self
-                    .get(&time_key, ReadOption::default().no_decompress())
-                    .await?
-                {
+                if let Some(entry) = self.get(&time_key, ReadOption::default()).await? {
                     sender.send(vec![entry]).await?;
-                };
+                }
             }
         }
 
@@ -239,6 +236,13 @@ impl Levels {
                         .file_manager
                         .open_sstable(self.tid, level_id)
                         .await?;
+                    // table file is empty, means this level haven't finished it compaction. Need to
+                    // read value from L0 rick.
+                    // But this check (via file's size) is not good. the write operation may not guarantee to be atomic.
+                    // todo: add a flag to indicate whether a compact is finished.
+                    if table_file.size().await? == 0 {
+                        return self.get_from_rick(time_key).await;
+                    }
                     let handle = SSTable::open(table_file)
                         .await?
                         .into_read_handle(self.ctx.clone())
@@ -264,6 +268,7 @@ impl Levels {
                         };
                         key_cache_entry.compressed = Some(&entry.value);
                         self.cache.put_key(key_cache_entry);
+                        entry.timestamp = time_key.0;
                         entry.value = value;
                         Ok(Some(entry))
                     } else {
@@ -354,16 +359,14 @@ impl Levels {
         );
 
         // make entry_map (from memindex) and purge
-        let mut memindex = self.memindex.lock().await;
+        let memindex = self.memindex.lock().await;
         let offsets = memindex.load_time_range(range);
-        memindex.purge_time_range(range);
         drop(memindex);
-        trace!("[compact] level {}, purge memindex", level_id);
         let mut rick = self.rick.lock().await;
         let entries = rick.reads(offsets).await?;
-        rick.clean().await?;
-        trace!("[compact] level {}, rick reads", level_id);
+        let offset_end = rick.get_legal_offset_end();
         drop(rick);
+        trace!("[compact] level {}, rick reads", level_id);
 
         let mut entry_map = HashMap::new();
         for entry in entries {
@@ -421,6 +424,14 @@ impl Levels {
         // self.rick.lock().await.clean().await?;
         // todo: gc memindex
         // self.memindex.lock().await.purge_time_range(range);
+        let mut memindex = self.memindex.lock().await;
+        memindex.purge_time_range(range);
+        drop(memindex);
+        trace!("[compact] level {}, purge memindex", level_id);
+        let mut rick = self.rick.lock().await;
+        rick.push_legal_offset_start(offset_end).await?;
+        drop(rick);
+        trace!("[compact] level {}, clean rick", level_id);
 
         debug!("compact {} finish", level_id);
 
@@ -695,7 +706,10 @@ mod test {
             let timestamp_reviewer: Arc<Mutex<Box<dyn TimestampReviewer>>> =
                 Arc::new(Mutex::new(Box::new(SimpleTimestampReviewer::new(10, 30))));
             let sender = MeshBuilder::full(1, 1).join().await.unwrap().0;
-            let levels = Levels::try_new(1, timestamp_reviewer, ctx, sender)
+            let level_info = Arc::new(Mutex::new(
+                ctx.file_manager.open_level_info().await.unwrap(),
+            ));
+            let levels = Levels::try_new(1, timestamp_reviewer, ctx, sender, level_info)
                 .await
                 .unwrap();
 
@@ -737,12 +751,6 @@ mod test {
 
     #[test]
     fn put_get_with_compaction() {
-        // use tracing::Level;
-        // use tracing_subscriber;
-        // tracing_subscriber::fmt()
-        //     .with_max_level(Level::TRACE)
-        //     .init();
-
         let ex = LocalExecutor::default();
         ex.run(async {
             let base_dir = tempdir().unwrap();
@@ -755,7 +763,10 @@ mod test {
             let timestamp_reviewer: Arc<Mutex<Box<dyn TimestampReviewer>>> =
                 Arc::new(Mutex::new(Box::new(SimpleTimestampReviewer::new(10, 30))));
             let sender = MeshBuilder::full(1, 1).join().await.unwrap().0;
-            let levels = Levels::try_new(1, timestamp_reviewer, ctx.clone(), sender)
+            let level_info = Arc::new(Mutex::new(
+                ctx.file_manager.open_level_info().await.unwrap(),
+            ));
+            let levels = Levels::try_new(1, timestamp_reviewer, ctx.clone(), sender, level_info)
                 .await
                 .unwrap();
 

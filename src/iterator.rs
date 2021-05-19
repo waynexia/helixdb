@@ -17,7 +17,7 @@ pub trait Iterator {
 
 /// Iterate over timestamp. i.e, (ts 0, key 1) -> (ts 1, key 1) -> (ts 2, key 1)...
 ///
-/// "Scan" is simulated via `get()`
+/// "Scan" is achieved via (lots of) `get()`
 pub struct TimeIterator<C: Comparator> {
     inner: ShardMuxTimeIterator<C>,
     buf: Vec<Entry>,
@@ -79,13 +79,17 @@ impl ShardTimeIterator {
     }
 
     // todo: maybe add a trait `PeekableIterator` : `Iterator`
-    fn peek(&self) -> Option<&Vec<Entry>> {
+    pub fn peek(&self) -> Option<&Vec<Entry>> {
         self.ready.as_ref()
     }
 
     /// Take current value but not step iterator after that.
-    fn take(&mut self) -> Option<Vec<Entry>> {
-        self.ready.take()
+    pub async fn take(&mut self) -> Result<Option<Vec<Entry>>> {
+        // println!("going to take entry from shard iter {:?}", self.ready);
+        let ready = self.ready.take();
+        self.step().await?;
+
+        Ok(ready)
     }
 
     async fn step(&mut self) -> Result<()> {
@@ -101,7 +105,7 @@ impl ShardTimeIterator {
         Ok(())
     }
 
-    fn is_valid(&self) -> bool {
+    pub fn is_valid(&self) -> bool {
         !self.is_finished
     }
 }
@@ -134,8 +138,10 @@ impl<C: Comparator> ShardMuxTimeIterator<C> {
         Some(next)
     }
 
+    /// Valid when underlying iters aren't all consumed or `entry_buf` still
+    /// buffers some entries.
     fn is_valid(&self) -> bool {
-        !self.iters.is_empty()
+        !self.iters.is_empty() || !self.entry_buf.is_empty()
     }
 
     async fn init(&mut self, buf_size: usize) {
@@ -169,10 +175,9 @@ impl<C: Comparator> ShardMuxTimeIterator<C> {
         }
 
         // consume
-        let item = self.iters[0].take().unwrap();
+        let mut first_iter = self.iters.pop().unwrap();
+        let item = first_iter.take().await?.unwrap();
         self.entry_buf.push(item.into());
-        self.iters[0].step().await?;
-        let first_iter = self.iters.pop().unwrap();
         // this iterator is finished
         if !first_iter.is_valid() {
             return Ok(());

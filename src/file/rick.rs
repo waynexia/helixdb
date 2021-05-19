@@ -226,6 +226,19 @@ impl Rick {
         self.sync_super_block().await
     }
 
+    pub async fn push_legal_offset_start(&mut self, new_offset_start: Offset) -> Result<()> {
+        if new_offset_start <= self.sb.legal_offset_start {
+            return Ok(());
+        }
+
+        self.sb.legal_offset_start = new_offset_start;
+        self.sync_super_block().await
+    }
+
+    pub fn get_legal_offset_end(&self) -> Offset {
+        self.sb.legal_offset_end
+    }
+
     /// Read super block from the first 4KB block of file.
     /// And if file is empty a new super block will be created.
     ///

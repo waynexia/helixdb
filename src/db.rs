@@ -5,7 +5,7 @@ use std::thread::JoinHandle;
 
 use futures_util::future::try_join_all;
 use glommio::channels::channel_mesh::MeshBuilder;
-use glommio::LocalExecutorBuilder;
+use glommio::{LocalExecutor, LocalExecutorBuilder};
 use tokio::sync::mpsc::{channel as bounded_channel, Sender};
 use tokio::sync::oneshot::channel as oneshot;
 use tokio::sync::Mutex;
@@ -90,6 +90,12 @@ impl HelixCore {
             fn_registry: opts.fn_registry,
         });
         let tsr = Arc::new(Mutex::new(opts.tsr));
+        let level_info = LocalExecutor::default().run(async {
+            // initialize components requiring runtime.
+            Arc::new(Mutex::new(
+                ctx.file_manager.open_level_info().await.unwrap(),
+            ))
+        });
 
         let mut worker_handle = Vec::with_capacity(opts.num_shard);
         let mut task_txs = Vec::with_capacity(opts.num_shard);
@@ -100,12 +106,15 @@ impl HelixCore {
             let ctx = ctx.clone();
             let (tx, rx) = bounded_channel(opts.task_buffer_size);
             let mesh_builder = mesh_builder.clone();
+            let level_info = level_info.clone();
 
             let handle = LocalExecutorBuilder::new()
                 .pin_to_cpu(tid as usize)
                 .spawn(move || async move {
                     let (sender, receiver) = mesh_builder.join().await.unwrap();
-                    let worker = IOWorker::try_new(tid, tsr, ctx, sender).await.unwrap();
+                    let worker = IOWorker::try_new(tid, tsr, level_info, ctx, sender)
+                        .await
+                        .unwrap();
                     worker.run(rx, receiver).await
                 })
                 .unwrap();
@@ -223,9 +232,12 @@ impl Drop for HelixCore {
 
 #[cfg(test)]
 mod test {
+    use std::convert::TryInto;
+
     use tempfile::tempdir;
 
     use super::*;
+    use crate::{FnRegistry, LexicalComparator, SimpleTimestampReviewer};
 
     #[tokio::test]
     async fn example() {
@@ -244,5 +256,74 @@ mod test {
             .await
             .unwrap();
         assert_eq!(result.unwrap(), entry);
+    }
+
+    async fn scan_test_scaffold(
+        num_shard: usize,
+        num_timestamp: i64,
+        num_key: u64,
+        compact_interval: i64,
+    ) {
+        assert!(num_timestamp > 0, "timestamp number should be positive");
+
+        let mut fn_registry = FnRegistry::new_noop();
+        fn_registry.register_sharding_key_fn(Arc::new(move |key| {
+            u64::from_le_bytes(key.to_owned().try_into().unwrap()) as usize % num_shard
+        }));
+        let simple_tsr = SimpleTimestampReviewer::new(compact_interval, i64::MAX);
+        let opts = Options::default()
+            .shards(num_shard)
+            .set_fn_registry(fn_registry)
+            .set_timestamp_reviewer(Box::new(simple_tsr));
+        let base_dir = tempdir().unwrap();
+        let db = HelixDB::open(base_dir.path(), opts);
+
+        // write
+        for timestamp in 0..num_timestamp {
+            let entries = (0..num_key)
+                .into_iter()
+                .map(|key| Entry {
+                    timestamp,
+                    key: key.to_le_bytes().to_vec(),
+                    value: b"value".to_vec(),
+                })
+                .collect();
+            db.put(entries).await.unwrap();
+        }
+
+        // scan
+        let mut iter = db
+            .scan::<LexicalComparator>(
+                (0, num_timestamp).into(),
+                (0u64.to_le_bytes().to_vec(), num_key.to_le_bytes().to_vec()),
+                ScanOption {
+                    prefetch_buf_size: 1,
+                },
+            )
+            .await
+            .unwrap();
+
+        let mut count = 0;
+        while iter.is_valid() {
+            iter.next().await.unwrap();
+            count += 1;
+        }
+
+        assert_eq!(num_timestamp as u64 * num_key, count);
+    }
+
+    #[tokio::test]
+    async fn scan_1_shard_without_compaction() {
+        scan_test_scaffold(1, 10, 128, 1024).await;
+    }
+
+    #[tokio::test]
+    async fn scan_many_shards_without_compaction() {
+        scan_test_scaffold(8, 10, 128, 1024).await;
+    }
+
+    #[tokio::test]
+    async fn scan_many_shards_with_compaction() {
+        scan_test_scaffold(2, 64, 8, 32).await;
     }
 }

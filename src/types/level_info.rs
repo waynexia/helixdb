@@ -42,9 +42,9 @@ impl LevelDesc {
     }
 }
 
-// This should be placed in heap? And each thread keeps a copy of it.
 #[derive(Debug)]
 pub struct LevelInfo {
+    // todo: remove RwLock
     infos: RwLock<VecDeque<LevelDesc>>,
 }
 
