@@ -7,7 +7,6 @@ use std::ops::Index;
 use crate::error::{HelixError, Result};
 use crate::types::{Bytes, Entry};
 
-// todo: rename this.
 pub(crate) trait KeyExtractor<T: Borrow<Self>>: Eq {
     fn key(data: &T) -> &[u8];
 }
@@ -25,34 +24,29 @@ pub trait Comparator: Send + Sync + Eq {
         Self: Sized;
 }
 
-// todo: simplify this. put KeyExtractor into T.
 #[derive(Eq, PartialEq)]
-pub(crate) struct OrderingHelper<O: Comparator, E: KeyExtractor<T>, T: Borrow<E>> {
+pub(crate) struct OrderingHelper<C: Comparator, T: KeyExtractor<T>> {
     pub data: T,
-    _o: PhantomData<O>,
-    _e: PhantomData<E>,
+    _c: PhantomData<C>,
 }
 
-impl<O: Comparator, E: KeyExtractor<T>, T: Eq + Borrow<E>> Ord for OrderingHelper<O, E, T> {
+impl<C: Comparator, T: Eq + KeyExtractor<T>> Ord for OrderingHelper<C, T> {
     fn cmp(&self, other: &Self) -> Ordering {
-        O::cmp(E::key(&self.data), E::key(&other.data))
+        C::cmp(T::key(&self.data), T::key(&other.data))
     }
 }
 
-impl<O: Comparator, E: KeyExtractor<T>, T: PartialEq + Borrow<E>> PartialOrd
-    for OrderingHelper<O, E, T>
-{
+impl<C: Comparator, T: PartialEq + KeyExtractor<T>> PartialOrd for OrderingHelper<C, T> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(O::cmp(E::key(&self.data), E::key(&other.data)))
+        Some(C::cmp(T::key(&self.data), T::key(&other.data)))
     }
 }
 
-impl<O: Comparator, E: KeyExtractor<T>, T: Borrow<E>> From<T> for OrderingHelper<O, E, T> {
+impl<C: Comparator, T: KeyExtractor<T>> From<T> for OrderingHelper<C, T> {
     fn from(data: T) -> Self {
         Self {
             data,
-            _o: PhantomData,
-            _e: PhantomData,
+            _c: PhantomData,
         }
     }
 }

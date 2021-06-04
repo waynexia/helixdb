@@ -112,7 +112,7 @@ impl ShardTimeIterator {
 
 pub struct ShardMuxTimeIterator<C: Comparator> {
     iters: Vec<ShardTimeIterator>,
-    entry_buf: BinaryHeap<OrderingHelper<C, Vec<Entry>, Vec<Entry>>>,
+    entry_buf: BinaryHeap<OrderingHelper<C, Vec<Entry>>>,
 }
 
 impl<C: Comparator> ShardMuxTimeIterator<C> {
