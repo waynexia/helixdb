@@ -189,10 +189,8 @@ impl Levels {
                 }));
             }
             KeyCacheResult::Compressed(compressed) => {
-                let value = match self.decompress_and_find(time_key, &compressed, opt.decompress)? {
-                    Some(thing) => thing,
-                    None => return Ok(None),
-                };
+                let value =
+                    ok_unwrap!(self.decompress_and_find(time_key, &compressed, opt.decompress)?);
 
                 key_cache_entry.value = Some(&value);
                 key_cache_entry.compressed = Some(&compressed);
@@ -209,11 +207,11 @@ impl Levels {
                 let rick = Rick::open(rick_file, None).await?;
                 let raw_bytes = rick.read(offset as u64).await?;
 
-                let value =
-                    match self.decompress_and_find(time_key, &raw_bytes.value, opt.decompress)? {
-                        Some(thing) => thing,
-                        None => return Ok(None),
-                    };
+                let value = ok_unwrap!(self.decompress_and_find(
+                    time_key,
+                    &raw_bytes.value,
+                    opt.decompress
+                )?);
 
                 key_cache_entry.value = Some(&value);
                 key_cache_entry.compressed = Some(&raw_bytes.value);
@@ -258,14 +256,11 @@ impl Levels {
                 // update cache
                 if let Some(mut entry) = entry {
                     if handle.is_compressed() {
-                        let value = match self.decompress_and_find(
+                        let value = ok_unwrap!(self.decompress_and_find(
                             time_key,
                             &entry.value,
                             opt.decompress,
-                        )? {
-                            Some(thing) => thing,
-                            None => return Ok(None),
-                        };
+                        )?);
                         key_cache_entry.compressed = Some(&entry.value);
                         self.cache.put_key(key_cache_entry);
                         entry.timestamp = time_key.0;
@@ -465,13 +460,9 @@ impl Levels {
 
         // todo: move this logic to UDCF
         entries.sort_by_key(|e| e.0);
-        let index = match entries
+        let index = ok_unwrap!(entries
             .binary_search_by_key(&time_key.0, |(ts, _)| *ts)
-            .ok()
-        {
-            Some(thing) => thing,
-            None => return Ok(None),
-        };
+            .ok());
         let (_, value) = &entries[index];
 
         Ok(Some(value.clone()))
@@ -578,7 +569,7 @@ impl WriteBatch {
             notifier: RefCell::new(vec![]),
             buf: RefCell::new(vec![]),
             timeout: Duration::from_millis(500),
-            batch_size: 1,
+            batch_size: 0,
             lock: Mutex::new(()),
             action: RwLock::new(None),
         }

@@ -10,6 +10,39 @@
 #![allow(dead_code)]
 #![allow(unused_variables)]
 
+/// Unwrap `Option` under the `Result<Option<T>>` return type requirement.
+/// The `None` case will early return with `Ok(None)`.
+///
+/// # Example
+/// *Notice this macro is not exported via "`#[macro_export]`" so the following
+/// example will not be run as a test case.*
+/// ```
+/// # #![feature(never_type)]
+/// # #[macro_use] extern crate helixdb;
+/// fn return_ok_none() -> Result<Option<usize>, !> {
+///     let val: Option<usize> = None;
+///     ok_unwrap!(val);
+///     panic!("should have returned");
+/// }
+///
+/// # fn container() -> Result<Option<()>, !> {
+/// let val = ok_unwrap!(Some(0usize));
+/// assert_eq!(val, 0usize);
+/// assert_eq!(return_ok_none(), Ok(None));
+/// #    Ok(None)
+/// # }
+///
+/// # let _ = container();
+/// ```
+macro_rules! ok_unwrap {
+    ($e:expr) => {
+        match $e {
+            Some(thing) => thing,
+            None => return Ok(None),
+        }
+    };
+}
+
 #[deprecated]
 mod blocks;
 mod cache;

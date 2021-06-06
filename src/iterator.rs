@@ -33,10 +33,7 @@ impl<C: Comparator> TimeIterator<C> {
 
     pub(crate) async fn next(&mut self) -> Result<Option<Entry>> {
         if self.buf.is_empty() {
-            self.buf = match self.inner.next().await {
-                Some(thing) => thing,
-                None => return Ok(None),
-            };
+            self.buf = ok_unwrap!(self.inner.next().await);
         }
 
         Ok(self.buf.pop())
