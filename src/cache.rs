@@ -4,6 +4,7 @@ use std::rc::Rc;
 
 use lru::LruCache;
 
+use crate::error::Result;
 use crate::table::{TableIdentifier, TableReadHandle};
 use crate::types::{Bytes, LevelId, ThreadId, Timestamp};
 
@@ -26,7 +27,7 @@ pub struct CacheConfig {
 impl Default for CacheConfig {
     fn default() -> Self {
         Self {
-            table_handle_size: 128,
+            table_handle_size: 32,
             kp_cache_size: 512,
             kv_cache_size: 256,
             kc_cache_size: 64,
@@ -68,8 +69,17 @@ impl Cache {
         self.handle_cache.borrow_mut().get(table_id).cloned()
     }
 
-    pub fn put_table_handle(&self, table_id: TableIdentifier, handle: Rc<TableReadHandle>) {
-        self.handle_cache.borrow_mut().put(table_id, handle);
+    pub async fn put_table_handle(
+        &self,
+        table_id: TableIdentifier,
+        handle: Rc<TableReadHandle>,
+    ) -> Result<()> {
+        let outdated = self.handle_cache.borrow_mut().put(table_id, handle);
+        if let Some(handle) = outdated {
+            handle.try_close().await?;
+        }
+
+        Ok(())
     }
 
     // todo: use `TimeKey` struct instead.

@@ -52,6 +52,12 @@ impl SSTable {
         Ok(handle)
     }
 
+    pub async fn close(self) -> Result<()> {
+        self.file.close().await?;
+
+        Ok(())
+    }
+
     /// Read super block from the first 4KB block of file.
     /// And if file is empty a new super block will be created.
     // todo: duplicate code with `Rick::read_super_block()`

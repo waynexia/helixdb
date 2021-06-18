@@ -1,3 +1,4 @@
+use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::context::Context;
@@ -65,6 +66,24 @@ impl TableReadHandle {
 
     pub fn is_compressed(&self) -> bool {
         self.rick.is_compressed()
+    }
+
+    pub async fn close(self) -> Result<()> {
+        self.rick.close().await?;
+        self.sstable.close().await?;
+
+        Ok(())
+    }
+
+    /// Try to close this handle which is wrapped by `Rc`. This method will
+    /// only perform actually close when "this" is the last existing
+    /// reference.
+    pub async fn try_close(self: Rc<Self>) -> Result<()> {
+        if let Ok(handle) = Rc::try_unwrap(self) {
+            handle.close().await?;
+        }
+
+        Ok(())
     }
 
     // For test case.

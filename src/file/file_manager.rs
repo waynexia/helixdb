@@ -100,6 +100,7 @@ impl FileManager {
         // read all
         let size = file.size().await?;
         let buf = file.read(0, size).await?;
+        file.close().await?;
 
         let level_info = LevelInfo::decode(&buf);
         Ok(level_info)
@@ -113,6 +114,7 @@ impl FileManager {
 
         file.write(bytes, 0).await?;
         file.sync().await?;
+        file.close().await?;
 
         Ok(())
     }

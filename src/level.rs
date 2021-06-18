@@ -206,6 +206,7 @@ impl Levels {
                 let rick_file = self.ctx.file_manager.open_vlog(tid, level_id).await?;
                 let rick = Rick::open(rick_file, None).await?;
                 let raw_bytes = rick.read(offset as u64).await?;
+                rick.close().await?;
 
                 let value = ok_unwrap!(self.decompress_and_find(
                     time_key,
@@ -248,14 +249,17 @@ impl Levels {
 
                     let handle = Rc::new(handle);
                     self.cache
-                        .put_table_handle((self.tid, level_id).into(), handle.clone());
+                        .put_table_handle((self.tid, level_id).into(), handle.clone())
+                        .await?;
                     handle
                 };
 
                 let entry = handle.get(time_key).await?;
+                let is_compressed = handle.is_compressed();
+                handle.try_close().await?;
                 // update cache
                 if let Some(mut entry) = entry {
-                    if handle.is_compressed() {
+                    if is_compressed {
                         let value = ok_unwrap!(self.decompress_and_find(
                             time_key,
                             &entry.value,
