@@ -6,6 +6,7 @@ use glommio::channels::channel_mesh::{
     Receivers as ChannelMeshReceiver,
     Senders as ChannelMeshSender,
 };
+use glommio::sync::Gate;
 use glommio::Task as GlommioTask;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::oneshot::Sender as Notifier;
@@ -18,6 +19,16 @@ use crate::level::{Levels, TimestampReviewer};
 use crate::option::ReadOption;
 use crate::types::{Bytes, Entry, LevelInfo, ThreadId, TimeRange, Timestamp};
 use crate::TimestampAction;
+
+thread_local!(
+    // todo: the api of glommio::Gate seems not very suit for our use case.
+    // Expecting for a more ergonomic way to register critical task.
+    // It is essentially a counter.
+    /// A TLS variable for graceful shutdown.
+    ///
+    /// It will wait until all tasks spawned via it are finished when closing.
+    pub static GATE: Rc<Gate> = Rc::new(Gate::new())
+);
 
 /// A un-Send handle to accept and process requests.
 pub struct IOWorker {
@@ -63,33 +74,53 @@ impl IOWorker {
             })
             .detach();
         }
+
+        // the `Error` case of `Gate::spawn()` is glommio runtime cannot find given task queue
+        // which needn't to take into consideration since we don't specify task queue.
         while let Some(task) = rx.recv().await {
             match task {
                 Task::Put(entries, tx) => {
                     let levels = self.levels.clone();
-                    GlommioTask::local(async move {
-                        levels.put(entries, tx).await;
-                    })
-                    .detach();
+                    GATE.with(|gate| {
+                        gate.spawn(async move {
+                            levels.put(entries, tx).await;
+                        })
+                        .unwrap()
+                        .detach()
+                    });
                 }
                 Task::Get(ts, key, tx, opt) => {
                     let levels = self.levels.clone();
-                    GlommioTask::local(async move {
-                        let result = levels.get(&(ts, key), opt).await;
-                        let _ = tx.send(result);
-                    })
-                    .detach();
+                    GATE.with(|gate| {
+                        gate.spawn(async move {
+                            let result = levels.get(&(ts, key), opt).await;
+                            let _ = tx.send(result);
+                        })
+                        .unwrap()
+                        .detach()
+                    });
                 }
                 Task::Scan(time_range, key_start, key_end, sender, cmp) => {
                     let levels = self.levels.clone();
-                    GlommioTask::local(async move {
-                        let _ = levels
-                            .scan(time_range, key_start, key_end, sender, cmp)
-                            .await;
-                    })
-                    .detach();
+                    GATE.with(|gate| {
+                        gate.spawn(async move {
+                            let _ = levels
+                                .scan(time_range, key_start, key_end, sender, cmp)
+                                .await;
+                        })
+                        .unwrap()
+                        .detach()
+                    });
                 }
-                Task::Shutdown => break,
+                Task::Shutdown => {
+                    trace!("going to close shard {}", self.tid);
+
+                    let gate = GATE.with(|gate| gate.clone());
+                    let _ = gate.close().await;
+
+                    trace!("shard {} is closed", self.tid);
+                    break;
+                }
             }
         }
     }

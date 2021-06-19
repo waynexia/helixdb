@@ -19,6 +19,7 @@ use crate::context::Context;
 use crate::error::{HelixError, Result};
 use crate::file::{IndexBlockBuilder, Rick, SSTable, TableBuilder};
 use crate::index::MemIndex;
+use crate::io_worker;
 use crate::option::ReadOption;
 use crate::types::{Bytes, Entry, LevelId, LevelInfo, ThreadId, TimeRange, Timestamp, ValueFormat};
 
@@ -340,9 +341,19 @@ impl Levels {
 
     /// Compact entries from rick in [start_ts, end_ts] to next level.
     ///
+    /// This function is wrapped by `Gate` which means HelixCore will wait it to
+    /// finish before close and shutdown. Whereas compactions that are invoked
+    /// after the gate is closing or closed will be ignored.
+    ///
     /// todo: how to handle rick file is not fully covered by given time range?.
     #[instrument]
     async fn compact(&self, range: TimeRange, level_id: LevelId) -> Result<()> {
+        // Keep the gate open until compact finished. The question mark (try) indicates
+        // a early return once it's failed to spawn to the gate.
+        let (tx, rx) = glommio::channels::local_channel::new_bounded(1);
+        io_worker::GATE
+            .with(|gate| gate.spawn(async move { rx.recv().await }))?
+            .detach();
         debug!(
             "[compact] start compact. range {:?}, level {}",
             range, level_id
@@ -433,6 +444,7 @@ impl Levels {
         trace!("[compact] level {}, clean rick", level_id);
 
         debug!("compact {} finish", level_id);
+        let _ = tx.send(()).await;
 
         Ok(())
     }
@@ -612,7 +624,12 @@ impl WriteBatch {
         drop(guard);
 
         // write and reply
-        let result = level.put_internal(buf).await;
+        let result = io_worker::GATE
+            .with(|gate| {
+                gate.spawn(async move { level.put_internal(buf).await })
+                    .unwrap()
+            })
+            .await;
         if result.is_ok() {
             for tx in notifier {
                 let _ = tx.send(Ok(()));

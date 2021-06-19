@@ -1,17 +1,20 @@
 use std::collections::HashMap;
+use std::intrinsics::unlikely;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
-use futures_util::future::try_join_all;
+use futures_util::future::{join_all, try_join_all};
 use glommio::channels::channel_mesh::MeshBuilder;
 use glommio::{LocalExecutor, LocalExecutorBuilder};
 use tokio::sync::mpsc::{channel as bounded_channel, Sender};
 use tokio::sync::oneshot::channel as oneshot;
 use tokio::sync::Mutex;
+use tracing::info;
 
 use crate::context::Context;
-use crate::error::Result;
+use crate::error::{HelixError, Result};
 use crate::file::FileManager;
 use crate::io_worker::{IOWorker, Task};
 use crate::iterator::{Iterator, ShardMuxTimeIterator, ShardTimeIterator, TimeIterator};
@@ -70,6 +73,12 @@ impl HelixDB {
     ) -> Result<impl Iterator> {
         self.core.scan::<C>(time_range, key_range, opt).await
     }
+
+    pub async fn close(self) {
+        info!("Closing HelixDB");
+        self.core.close().await;
+        // self.core.close().await
+    }
 }
 
 unsafe impl Send for HelixDB {}
@@ -80,6 +89,7 @@ pub(crate) struct HelixCore {
     worker_handle: Vec<JoinHandle<()>>,
     task_txs: Vec<Sender<Task>>,
     ctx: Arc<Context>,
+    is_closed: AtomicBool,
 }
 
 impl HelixCore {
@@ -127,11 +137,14 @@ impl HelixCore {
             worker_handle,
             task_txs,
             ctx,
+            is_closed: AtomicBool::new(false),
         }
     }
 
     /// Dispatch entries in write batch to corresponding shards.
     async fn sharding_put(&self, write_batch: Vec<Entry>) -> Result<()> {
+        self.check_closed()?;
+
         let mut tasks = HashMap::<usize, Vec<_>>::new();
 
         for entry in write_batch {
@@ -150,6 +163,8 @@ impl HelixCore {
 
     /// Put on specified shard without routing.
     async fn put_unchecked(&self, worker: usize, write_batch: Vec<Entry>) -> Result<()> {
+        self.check_closed()?;
+
         let (tx, rx) = oneshot();
         let task = Task::Put(write_batch, tx);
 
@@ -164,6 +179,8 @@ impl HelixCore {
         key: Bytes,
         opt: ReadOption,
     ) -> Result<Option<Entry>> {
+        self.check_closed()?;
+
         let shard_id = self.ctx.fn_registry.sharding_fn()(&key);
         self.get_unchecked(shard_id, timestamp, key, opt).await
     }
@@ -176,6 +193,8 @@ impl HelixCore {
         key: Bytes,
         opt: ReadOption,
     ) -> Result<Option<Entry>> {
+        self.check_closed()?;
+
         let (tx, rx) = oneshot();
         let task = Task::Get(timestamp, key, tx, opt);
 
@@ -190,6 +209,8 @@ impl HelixCore {
         key_range: (Bytes, Bytes),
         opt: ScanOption,
     ) -> Result<impl Iterator> {
+        self.check_closed()?;
+
         let iters: Vec<_> = (0..self.shards())
             .map(|worker| (worker, key_range.clone()))
             .map(async move |(worker, key_range)| -> Result<_> {
@@ -215,8 +236,26 @@ impl HelixCore {
         Ok(iter)
     }
 
+    async fn close(&self) {
+        self.is_closed.store(true, Ordering::SeqCst);
+
+        for index in 0..self.shards() {
+            let _ = self.task_txs[index].send(Task::Shutdown).await;
+        }
+
+        join_all(self.task_txs.iter().map(|sender| sender.closed())).await;
+    }
+
     fn shards(&self) -> usize {
         self.worker_handle.len()
+    }
+
+    fn check_closed(&self) -> Result<()> {
+        if unlikely(self.is_closed.load(Ordering::SeqCst)) {
+            return Err(HelixError::Closed);
+        }
+
+        Ok(())
     }
 }
 

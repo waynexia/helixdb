@@ -19,7 +19,7 @@ pub enum HelixError {
     NotFound,
     #[error("Task dropped")]
     Dropped(#[from] tokio::sync::oneshot::error::RecvError),
-    #[error("Helix stopped")]
+    #[error("Failed to send due to Helix is stopped")]
     Stopped(#[from] tokio::sync::mpsc::error::SendError<Task>),
     #[error("Operation {0} is poisoned")]
     Poisoned(String),
@@ -28,4 +28,6 @@ pub enum HelixError {
     Disconnected(#[from] tokio::sync::mpsc::error::SendError<Vec<Entry>>),
     #[error("Incompatible length or size, expect {0}, got {1}")]
     IncompatibleLength(usize, usize),
+    #[error("Helix is closed")]
+    Closed,
 }

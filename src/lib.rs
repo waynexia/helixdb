@@ -5,6 +5,7 @@
 #![feature(trait_alias)]
 #![feature(async_closure)]
 #![feature(btree_retain)]
+#![feature(core_intrinsics)]
 #![feature(new_uninit)]
 // todo: open these lints
 #![allow(dead_code)]

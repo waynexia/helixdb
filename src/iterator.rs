@@ -82,7 +82,6 @@ impl ShardTimeIterator {
 
     /// Take current value but not step iterator after that.
     pub async fn take(&mut self) -> Result<Option<Vec<Entry>>> {
-        // println!("going to take entry from shard iter {:?}", self.ready);
         let ready = self.ready.take();
         self.step().await?;
 
