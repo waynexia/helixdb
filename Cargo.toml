@@ -16,6 +16,7 @@ lru = "0.6"
 futures-util = "0.3"
 crossbeam-channel = "0.5"
 tracing = "0.1.26"
+jemallocator = "0.3.2"
 
 [dev-dependencies]
 tempfile = "3.2"
