@@ -93,13 +93,13 @@ pub(crate) struct HelixCore {
 }
 
 impl HelixCore {
-    fn new<P: AsRef<Path>>(path: P, opts: Options) -> Self {
+    fn new<P: AsRef<Path>>(path: P, mut opts: Options) -> Self {
         let file_manager = FileManager::with_base_dir(path).unwrap();
         let ctx = Arc::new(Context {
             file_manager,
-            fn_registry: opts.fn_registry,
+            fn_registry: opts.fn_registry.take().unwrap(),
         });
-        let tsr = Arc::new(Mutex::new(opts.tsr));
+        let tsr = Arc::new(Mutex::new(opts.tsr.take().unwrap()));
         let level_info = LocalExecutor::default().run(async {
             // initialize components requiring runtime.
             Arc::new(Mutex::new(
@@ -114,6 +114,7 @@ impl HelixCore {
         for tid in 0..opts.num_shard as u64 {
             let tsr = tsr.clone();
             let ctx = ctx.clone();
+            let opts = opts.clone_partial();
             let (tx, rx) = bounded_channel(opts.task_buffer_size);
             let mesh_builder = mesh_builder.clone();
             let level_info = level_info.clone();
@@ -122,7 +123,7 @@ impl HelixCore {
                 .pin_to_cpu(tid as usize)
                 .spawn(move || async move {
                     let (sender, receiver) = mesh_builder.join().await.unwrap();
-                    let worker = IOWorker::try_new(tid, tsr, level_info, ctx, sender)
+                    let worker = IOWorker::try_new(tid, opts, tsr, level_info, ctx, sender)
                         .await
                         .unwrap();
                     worker.run(rx, receiver).await
@@ -329,6 +330,8 @@ mod test {
                 .collect();
             db.put(entries).await.unwrap();
         }
+
+        println!("write finished");
 
         // scan
         let mut iter = db

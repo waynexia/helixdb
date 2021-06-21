@@ -16,7 +16,7 @@ use tracing::trace;
 use crate::context::Context;
 use crate::error::Result;
 use crate::level::{Levels, TimestampReviewer};
-use crate::option::ReadOption;
+use crate::option::{Options, ReadOption};
 use crate::types::{Bytes, Entry, LevelInfo, ThreadId, TimeRange, Timestamp};
 use crate::TimestampAction;
 
@@ -40,13 +40,21 @@ pub struct IOWorker {
 impl IOWorker {
     pub async fn try_new(
         tid: ThreadId,
+        opts: Options,
         timestamp_reviewer: Arc<Mutex<Box<dyn TimestampReviewer + 'static>>>,
         level_info: Arc<Mutex<LevelInfo>>,
         ctx: Arc<Context>,
         ts_action_sender: ChannelMeshSender<TimestampAction>,
     ) -> Result<Self> {
-        let levels =
-            Levels::try_new(tid, timestamp_reviewer, ctx, ts_action_sender, level_info).await?;
+        let levels = Levels::try_new(
+            tid,
+            opts,
+            timestamp_reviewer,
+            ctx,
+            ts_action_sender,
+            level_info,
+        )
+        .await?;
 
         Ok(Self { tid, levels })
     }

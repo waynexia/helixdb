@@ -8,6 +8,7 @@ use crate::error::Result;
 use crate::table::{TableIdentifier, TableReadHandle};
 use crate::types::{Bytes, LevelId, ThreadId, Timestamp};
 
+#[derive(Debug, Clone, Copy)]
 pub struct CacheConfig {
     /// Number of `SSTableHandle` cache entries.
     pub table_handle_size: usize,
@@ -54,7 +55,7 @@ pub struct Cache {
 }
 
 impl Cache {
-    pub fn new(config: CacheConfig) -> Self {
+    pub fn with_config(config: CacheConfig) -> Self {
         Self {
             handle_cache: RefCell::new(LruCache::new(config.table_handle_size)),
             kv_cache: RefCell::new(LruCache::new(config.kv_cache_size)),
@@ -63,6 +64,10 @@ impl Cache {
 
             config,
         }
+    }
+
+    pub fn default() -> Self {
+        Self::with_config(CacheConfig::default())
     }
 
     pub fn get_table_handle(&self, table_id: &TableIdentifier) -> Option<Rc<TableReadHandle>> {
