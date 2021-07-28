@@ -1,8 +1,25 @@
-# helixdb
+<img src="docs/image/helix_logo.jpg" height="100" width="100" style="display: block;  margin-left: auto;  margin-right: auto;">
 
-## Features
-- No Write-Ahead-Log
-- Thread-Per-Core Architecture
-- Async I/O
-- Time-To-Live Support
-- Low Write Amplification
+# HelixDB
+
+HelixDB is a Key-Value store written in Rust.
+
+# Features
+## Time Series
+HelixDB is designed to serve time-series data. "Key-Value" definition here is (`User Key`, `Logical Timestamp`) => `Data`
+
+## Time aware
+HelixDB organizes data in a time-aware way. This gives HelixDB the ability to efficiently processing time related requests like "Hierarchy" or "Outdate".
+
+## Custom Compression
+HelixDB gives users an interface to customize their compression method that best suits their data. 
+
+## Async I/O & Thread-Per-Core
+HelixDB use io-uring provided by glommio as IO library. The thread-per-core architecture is also built on top of glommio.
+
+HelixDB provides async interface, which is `Send` and can be spawned into other async runtime like tokio.
+
+# Status
+*This project is still in the early stages.* Laking of test coverage, robust functionality, documentation and other things. So
+
+Any discussion / suggestions / pull requests / issues / ... are welcome :heart:
