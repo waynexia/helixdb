@@ -6,4 +6,4 @@ edition = "2018"
 description = "Generated rust flatbuffer code."
 
 [dependencies]
-flatbuffers = "0.7.0"
+flatbuffers = "2.0.0"

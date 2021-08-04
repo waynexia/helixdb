@@ -44,7 +44,8 @@ impl Entry {
     }
 
     pub fn decode(bytes: &[u8]) -> Self {
-        let fb_entry = flatbuffers::get_root::<protos::Entry<'_>>(bytes);
+        // let fb_entry = flatbuffers::get_root::<protos::Entry<'_>>(bytes);
+        let fb_entry = flatbuffers::root::<protos::Entry<'_>>(bytes).unwrap();
 
         Self {
             timestamp: fb_entry.timestamp().unwrap().timestamp(),

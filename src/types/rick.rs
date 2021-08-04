@@ -53,7 +53,8 @@ impl RickSuperBlock {
     }
 
     pub fn decode(bytes: &[u8]) -> Self {
-        let fb_sb = flatbuffers::get_root::<protos::RickSuperBlock<'_>>(bytes);
+        let fb_sb = flatbuffers::root::<protos::RickSuperBlock<'_>>(bytes).unwrap();
+        // let fb_sb = flatbuffers::get_root::<protos::RickSuperBlock<'_>>(bytes);
 
         Self {
             is_ordered: fb_sb.is_ordered(),

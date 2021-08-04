@@ -74,7 +74,8 @@ impl LevelInfo {
             };
         }
 
-        let fb_info = flatbuffers::get_root::<protos::LevelInfo<'_>>(bytes);
+        // let fb_info = flatbuffers::get_root::<protos::LevelInfo<'_>>(bytes);
+        let fb_info = flatbuffers::root::<protos::LevelInfo<'_>>(bytes).unwrap();
         let infos = fb_info
             .infos()
             .unwrap()

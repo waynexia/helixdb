@@ -80,7 +80,8 @@ impl SSTableSuperBlock {
             };
         }
 
-        let fb_blocks = flatbuffers::get_root::<protos::SSTableSuperBlock<'_>>(bytes);
+        // let fb_blocks = flatbuffers::get_root::<protos::SSTableSuperBlock<'_>>(bytes);
+        let fb_blocks = flatbuffers::root::<protos::SSTableSuperBlock<'_>>(bytes).unwrap();
         let thread_id = fb_blocks.thread_id().unwrap().id();
         let level_id = fb_blocks.level_id().unwrap().id();
         let blocks = fb_blocks
@@ -141,7 +142,8 @@ impl IndexBlockEntry {
     }
 
     pub fn decode(bytes: &[u8]) -> Self {
-        let fb_entry = flatbuffers::get_root::<protos::IndexBlockEntry<'_>>(bytes);
+        // let fb_entry = flatbuffers::get_root::<protos::IndexBlockEntry<'_>>(bytes);
+        let fb_entry = flatbuffers::root::<protos::IndexBlockEntry<'_>>(bytes).unwrap();
 
         Self {
             value_offset: fb_entry.value_offset().unwrap().offset(),
