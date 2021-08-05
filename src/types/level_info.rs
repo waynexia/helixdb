@@ -1,5 +1,4 @@
 use std::collections::VecDeque;
-use std::sync::RwLock;
 
 use flatbuffers::FlatBufferBuilder;
 
@@ -45,19 +44,18 @@ impl LevelDesc {
 #[derive(Debug)]
 pub struct LevelInfo {
     // todo: remove RwLock
-    infos: RwLock<VecDeque<LevelDesc>>,
+    infos: VecDeque<LevelDesc>,
 }
 
 impl LevelInfo {
     pub fn encode(&self) -> Bytes {
         let mut fbb = FlatBufferBuilder::new();
-        let infos = self.infos.read().unwrap();
 
-        fbb.start_vector::<protos::LevelDesc>(infos.len());
-        for desc in &*infos {
+        fbb.start_vector::<protos::LevelDesc>(self.infos.len());
+        for desc in &self.infos {
             fbb.push(desc.to_generated_type());
         }
-        let batch = fbb.end_vector::<protos::LevelDesc>(infos.len());
+        let batch = fbb.end_vector::<protos::LevelDesc>(self.infos.len());
 
         let infos =
             protos::LevelInfo::create(&mut fbb, &protos::LevelInfoArgs { infos: Some(batch) });
@@ -70,7 +68,7 @@ impl LevelInfo {
         // for empty level-info file.
         if bytes.is_empty() {
             return Self {
-                infos: RwLock::new(VecDeque::default()),
+                infos: VecDeque::default(),
             };
         }
 
@@ -84,9 +82,7 @@ impl LevelInfo {
             .map(LevelDesc::from)
             .collect();
 
-        Self {
-            infos: RwLock::new(infos),
-        }
+        Self { infos }
     }
 
     /// Give a timestamp and find the level suits it.
@@ -96,14 +92,12 @@ impl LevelInfo {
     /// this level-info, `Some(0)` will be returned. `0` is a special [LevelId]
     /// stands for Rick level.
     pub fn get_level_id(&self, timestamp: Timestamp) -> Option<LevelId> {
-        let infos = self.infos.read().unwrap();
-
         // timestamp covered by rick will not present in level-info
-        if infos.is_empty() || timestamp > infos[0].end {
+        if self.infos.is_empty() || timestamp > self.infos[0].end {
             return Some(0);
         }
 
-        for desc in &*infos {
+        for desc in &self.infos {
             if desc.is_timestamp_match(timestamp) {
                 return Some(desc.id);
             }
@@ -121,20 +115,16 @@ impl LevelInfo {
     ) -> Result<LevelId> {
         let mut new_desc = LevelDesc { start, end, id: 0 };
 
-        let mut infos = self.infos.write().unwrap();
-        let next_id = infos.front().map_or_else(|| 1, |desc| desc.id + 1);
+        let next_id = self.infos.front().map_or_else(|| 1, |desc| desc.id + 1);
         new_desc.id = next_id;
-
-        infos.push_front(new_desc);
-        drop(infos);
-
+        self.infos.push_front(new_desc);
         self.sync(file_manager).await?;
 
         Ok(next_id)
     }
 
     pub async fn remove_last_level(&mut self, file_manager: &FileManager) -> Result<()> {
-        self.infos.write().unwrap().pop_back();
+        self.infos.pop_back();
 
         self.sync(file_manager).await
     }
@@ -151,9 +141,7 @@ impl LevelInfo {
     fn new(descriptions: Vec<LevelDesc>) -> Self {
         let infos = VecDeque::from(descriptions);
 
-        Self {
-            infos: RwLock::new(infos),
-        }
+        Self { infos }
     }
 }
 
@@ -176,7 +164,7 @@ mod test {
 
         let bytes = info.encode();
         let info = LevelInfo::decode(&bytes);
-        let infos: Vec<_> = info.infos.read().unwrap().iter().copied().collect();
+        let infos: Vec<_> = info.infos.iter().copied().collect();
 
         assert_eq!(vec![desc], infos);
     }
@@ -195,7 +183,7 @@ mod test {
             drop(info);
 
             let info = file_manager.open_level_info().await.unwrap();
-            let infos: Vec<_> = info.infos.read().unwrap().iter().copied().collect();
+            let infos: Vec<_> = info.infos.iter().copied().collect();
             let expected = vec![
                 LevelDesc {
                     start: 0,
