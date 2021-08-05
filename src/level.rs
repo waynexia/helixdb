@@ -826,14 +826,16 @@ mod test {
             }
 
             for timestamp in 0..25 {
-                levels
-                    .get(
-                        &(timestamp, b"key".to_vec()),
-                        ReadOption::default().no_decompress(),
-                    )
+                let result = levels
+                    .get(&(timestamp, b"key".to_vec()), ReadOption::default())
                     .await
                     .unwrap()
                     .unwrap();
+
+                assert_eq!(
+                    result,
+                    (timestamp, b"key".to_vec(), b"value".to_vec()).into()
+                );
             }
         });
     }

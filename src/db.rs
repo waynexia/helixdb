@@ -77,7 +77,6 @@ impl HelixDB {
     pub async fn close(self) {
         info!("Closing HelixDB");
         self.core.close().await;
-        // self.core.close().await
     }
 }
 
@@ -367,5 +366,38 @@ mod test {
     #[tokio::test]
     async fn scan_many_shards_with_compaction() {
         scan_test_scaffold(2, 64, 8, 32).await;
+    }
+
+    #[tokio::test]
+    async fn recover_from_restart() {
+        let base_dir = tempdir().unwrap();
+        let opts = Options::default()
+            .set_timestamp_reviewer(Box::new(SimpleTimestampReviewer::new(5, 100)))
+            .shards(1);
+        let db = HelixDB::open(base_dir.path(), opts);
+
+        let tasks = (0..50)
+            .map(|ts| {
+                db.put(vec![Entry {
+                    timestamp: ts,
+                    key: b"key".to_vec(),
+                    value: b"value".to_vec(),
+                }])
+            })
+            .collect::<Vec<_>>();
+        try_join_all(tasks).await.unwrap();
+        db.close().await;
+
+        let opts = Options::default()
+            .set_timestamp_reviewer(Box::new(SimpleTimestampReviewer::new(5, 100)))
+            .shards(1);
+        let db = HelixDB::open(base_dir.path(), opts);
+        for ts in 0..50 {
+            let result = db
+                .get(ts, b"key".to_vec(), ReadOption::default())
+                .await
+                .unwrap();
+            assert_eq!(result.unwrap().value, b"value".to_vec());
+        }
     }
 }

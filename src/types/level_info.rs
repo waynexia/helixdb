@@ -6,7 +6,7 @@ use super::{Bytes, LevelId, Timestamp};
 use crate::error::Result;
 use crate::file::FileManager;
 
-#[derive(Default, PartialEq, Debug, Clone, Copy)]
+#[derive(Default, PartialEq, Eq, Debug, Clone, Copy)]
 pub struct LevelDesc {
     start: Timestamp,
     end: Timestamp,
@@ -41,7 +41,11 @@ impl LevelDesc {
     }
 }
 
-#[derive(Debug)]
+/// Metadata of every levels. Is a array-like container of [LevelDesc].
+///
+/// [LevelDesc] is arranged from old (smaller timestamp) to new
+/// (larger timestamp).
+#[derive(Debug, PartialEq, Eq)]
 pub struct LevelInfo {
     // todo: remove RwLock
     infos: VecDeque<LevelDesc>,
@@ -72,13 +76,13 @@ impl LevelInfo {
             };
         }
 
-        // let fb_info = flatbuffers::get_root::<protos::LevelInfo<'_>>(bytes);
         let fb_info = flatbuffers::root::<protos::LevelInfo<'_>>(bytes).unwrap();
         let infos = fb_info
             .infos()
             .unwrap()
             .to_owned()
             .into_iter()
+            .rev() // `fbb.push()` in encode reversed the order
             .map(LevelDesc::from)
             .collect();
 
@@ -93,7 +97,7 @@ impl LevelInfo {
     /// stands for Rick level.
     pub fn get_level_id(&self, timestamp: Timestamp) -> Option<LevelId> {
         // timestamp covered by rick will not present in level-info
-        if self.infos.is_empty() || timestamp > self.infos[0].end {
+        if self.infos.is_empty() || timestamp > self.infos.back().unwrap().end {
             return Some(0);
         }
 
@@ -115,16 +119,16 @@ impl LevelInfo {
     ) -> Result<LevelId> {
         let mut new_desc = LevelDesc { start, end, id: 0 };
 
-        let next_id = self.infos.front().map_or_else(|| 1, |desc| desc.id + 1);
+        let next_id = self.infos.back().map_or_else(|| 1, |desc| desc.id + 1);
         new_desc.id = next_id;
-        self.infos.push_front(new_desc);
+        self.infos.push_back(new_desc);
         self.sync(file_manager).await?;
 
         Ok(next_id)
     }
 
     pub async fn remove_last_level(&mut self, file_manager: &FileManager) -> Result<()> {
-        self.infos.pop_back();
+        self.infos.pop_front();
 
         self.sync(file_manager).await
     }
@@ -155,18 +159,23 @@ mod test {
 
     #[test]
     fn level_desc_codec() {
-        let desc = LevelDesc {
-            start: 21,
-            end: 40,
-            id: 4,
-        };
-        let info = LevelInfo::new(vec![desc]);
+        let infos = LevelInfo::new(vec![
+            LevelDesc {
+                start: 21,
+                end: 40,
+                id: 4,
+            },
+            LevelDesc {
+                start: 100,
+                end: 200,
+                id: 8,
+            },
+        ]);
 
-        let bytes = info.encode();
-        let info = LevelInfo::decode(&bytes);
-        let infos: Vec<_> = info.infos.iter().copied().collect();
+        let bytes = infos.encode();
+        let decoded = LevelInfo::decode(&bytes);
 
-        assert_eq!(vec![desc], infos);
+        assert_eq!(decoded, infos);
     }
 
     #[test]

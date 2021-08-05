@@ -58,7 +58,6 @@ impl Entry {
     /// - Purpose: make a `&(A, B)` over a `&Self{A, B, C}`
     /// - Safety: `Entry` is qualified with `repr(C)`, memory layout is ensured to be
     /// the same with `((A, B), C)`.
-    /// - Alternative: maybe no alternative.
     pub fn time_key(&self) -> &(Timestamp, Bytes) {
         unsafe {
             let p_entry = self as *const Entry;
