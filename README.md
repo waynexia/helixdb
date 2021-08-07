@@ -2,7 +2,7 @@
 
 # HelixDB
 
-HelixDB is a Key-Value store written in Rust.
+HelixDB is a Key-Value store written in Rust. Checkout our [wiki](https://github.com/waynexia/helixdb/wiki) to get more!
 
 # Features
 ## Time Series
