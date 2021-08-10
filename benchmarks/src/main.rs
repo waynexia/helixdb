@@ -152,7 +152,7 @@ fn main() {
         .parse()
         .unwrap();
     let db = open_helix(dir, num_shard, compact_interval);
-    let guard = pprof::ProfilerGuard::new(100).unwrap();
+    // let guard = pprof::ProfilerGuard::new(100).unwrap();
 
     match matches.subcommand() {
         ("fill", Some(sub_matches)) => {
@@ -210,10 +210,11 @@ fn main() {
     }
 
     // post process
-    if let Ok(report) = guard.report().build() {
-        let file = File::create("flamegraph.svg").unwrap();
-        report.flamegraph(file).unwrap();
-    };
+    // todo: make flamegraph a option
+    // if let Ok(report) = guard.report().build() {
+    //     let file = File::create("flamegraph.svg").unwrap();
+    //     report.flamegraph(file).unwrap();
+    // };
     std::io::stdout().flush().unwrap();
 }
 

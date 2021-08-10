@@ -35,7 +35,7 @@ impl Panel {
     }
 
     pub fn observe(&mut self, progress: u64) {
-        // self.bar.set_position(progress);
+        self.bar.set_position(progress);
         self.processed = progress;
 
         if progress >= self.amount {
@@ -44,7 +44,7 @@ impl Panel {
     }
 
     pub fn increase(&mut self, delta: u64) {
-        // self.bar.inc(delta);
+        self.bar.inc(delta);
         self.processed += delta;
 
         if self.processed >= self.amount {

@@ -62,4 +62,6 @@ pub fn load(
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
+
+    rt.block_on(helixdb.close());
 }
