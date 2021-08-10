@@ -13,3 +13,14 @@ indicatif = "0.15.0"
 clap = "2.33"
 procfs = "0.9.1"
 pprof = { version = "0.4.3", features = ["flamegraph"] }
+tracing-subscriber = "0.2.18"
+tracing = "0.1.26"
+rand = { version = "0.8", default-features = false }
+
+[dev-dependencies]
+criterion = "0.3"
+
+[[bench]]
+name = "entry_codec"
+path = "microbenches/entry_codec.rs"
+harness = false
