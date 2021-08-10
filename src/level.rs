@@ -271,12 +271,11 @@ impl Levels {
                         self.cache.put_key(key_cache_entry);
                         entry.timestamp = time_key.0;
                         entry.value = value;
-                        Ok(Some(entry))
                     } else {
                         key_cache_entry.value = Some(&entry.value);
                         self.cache.put_key(key_cache_entry);
-                        Ok(Some(entry))
                     }
+                    Ok(Some(entry))
                 } else {
                     Ok(None)
                 }
@@ -401,7 +400,7 @@ impl Levels {
 
         // call compress_fn to compact points, build rick file and index block.
         for (key, ts_value) in entry_map {
-            debug_assert_eq!(false, ts_value.is_empty());
+            debug_assert!(!ts_value.is_empty());
             let first_ts = ts_value[0].0;
 
             let compressed_data = self
@@ -473,7 +472,7 @@ impl Levels {
         let mut entries = self
             .ctx
             .fn_registry
-            .decompress_entries(&time_key.1, &raw_bytes)?;
+            .decompress_entries(&time_key.1, raw_bytes)?;
 
         // todo: move this logic to UDCF
         entries.sort_by_key(|e| e.0);
@@ -615,6 +614,7 @@ impl WriteBatch {
 
     /// Enqueue some write requests. Then check the size limit.
     /// This will reset the timeout timer.
+    #[allow(clippy::branches_sharing_code)]
     pub async fn enqueue(
         self: Rc<Self>,
         mut reqs: Vec<Entry>,

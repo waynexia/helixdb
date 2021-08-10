@@ -25,7 +25,7 @@ impl From<protos::LevelDesc> for LevelDesc {
 }
 
 impl LevelDesc {
-    pub fn to_generated_type(&self) -> protos::LevelDesc {
+    pub fn as_generated_type(&self) -> protos::LevelDesc {
         let start = protos::Timestamp::new(self.start);
         let end = protos::Timestamp::new(self.end);
         let time_range = protos::TimeRange::new(&start, &end);
@@ -57,7 +57,7 @@ impl LevelInfo {
 
         fbb.start_vector::<protos::LevelDesc>(self.infos.len());
         for desc in &self.infos {
-            fbb.push(desc.to_generated_type());
+            fbb.push(desc.as_generated_type());
         }
         let batch = fbb.end_vector::<protos::LevelDesc>(self.infos.len());
 

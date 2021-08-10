@@ -45,7 +45,7 @@ impl RickSuperBlock {
         let mut padding_bytes = fbb.finished_data().to_vec();
 
         // the un-padding bytes should shorter than 4096 otherwise it will be truncated.
-        debug_assert_eq!(true, padding_bytes.len() <= Self::LENGTH);
+        debug_assert!(padding_bytes.len() <= Self::LENGTH);
         // padding it. Flatbuffers has the information about payload's length, so tailing
         // zero doesn't matter.
         padding_bytes.resize(Self::LENGTH, 0);

@@ -13,7 +13,7 @@ pub(crate) struct BlockInfo {
 }
 
 impl BlockInfo {
-    pub fn to_generated_type(&self) -> protos::BlockInfo {
+    pub fn as_generated_type(&self) -> protos::BlockInfo {
         let offset = protos::Offset::new(self.offset);
 
         protos::BlockInfo::new(self.block_type, &offset, self.length)
@@ -48,7 +48,7 @@ impl SSTableSuperBlock {
         let level_id = protos::LevelId::new(self.level_id);
         fbb.start_vector::<protos::BlockInfo>(self.blocks.len());
         for info in &self.blocks {
-            fbb.push(info.to_generated_type());
+            fbb.push(info.as_generated_type());
         }
         let blocks = fbb.end_vector::<protos::BlockInfo>(self.blocks.len());
         let blocks = protos::SSTableSuperBlock::create(
@@ -64,7 +64,7 @@ impl SSTableSuperBlock {
         let mut padding_bytes = fbb.finished_data().to_vec();
 
         // the un-padding bytes should shorter than 4096 otherwise it will be truncated.
-        debug_assert_eq!(true, padding_bytes.len() <= Self::LENGTH);
+        debug_assert!(padding_bytes.len() <= Self::LENGTH);
         // padding it. Flatbuffers has the information about payload's length, so tailing
         // zero doesn't matter.
         padding_bytes.resize(Self::LENGTH, 0);
