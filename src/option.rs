@@ -38,7 +38,7 @@ impl Clone for Options {
 impl Options {
     pub fn default() -> Self {
         Self {
-            num_shard: 8,
+            num_shard: num_cpus::get(),
             task_buffer_size: 128,
             cache: CacheConfig::default(),
             write_batch: WriteBatchConfig::default(),

@@ -360,7 +360,7 @@ mod test {
 
     #[tokio::test]
     async fn scan_many_shards_without_compaction() {
-        scan_test_scaffold(8, 10, 128, 1024).await;
+        scan_test_scaffold(num_cpus::get(), 10, 128, 1024).await;
     }
 
     #[tokio::test]
