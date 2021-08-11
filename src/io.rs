@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use glommio::io::{DmaFile, DmaOpenOptions};
+use glommio::io::{DmaFile, OpenOptions};
 use glommio::ByteSliceMutExt;
 
 use crate::error::Result;
@@ -16,11 +16,11 @@ impl File {
     /// Open or create on given path.
     #[inline]
     pub async fn open<P: AsRef<Path>>(path: P) -> Result<File> {
-        let file = DmaOpenOptions::new()
+        let file = OpenOptions::new()
             .create(true)
             .read(true)
             .write(true)
-            .open(path)
+            .dma_open(path)
             .await?;
 
         Ok(File(file))
