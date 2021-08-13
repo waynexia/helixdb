@@ -6,7 +6,8 @@ use crate::level::{SimpleTimestampReviewer, TimestampReviewer, WriteBatchConfig}
 // #[derive(Debug, Clone,Copy)]
 pub struct Options {
     // parameters
-    /// Number of shards. It is recommended to equal to the number of system processors.
+    /// Number of shards. It is recommended to equal to the number of system
+    /// processors.
     pub(crate) num_shard: usize,
     /// Queue length of each shard's task receiver.
     pub(crate) task_buffer_size: usize,
@@ -51,14 +52,15 @@ impl Options {
     /// Returns a copy of the value.
     /// This function may not works as expected. It is a "partial" clone.
     ///
-    /// Some fields in this [`Options`] struct isn't suit for clone, like `fn_registry` or `tsr`.
-    /// They are wrapped by a `Option`, and will only leave a `None` after called `clone_partial()`.
+    /// Some fields in this [`Options`] struct isn't suit for clone, like
+    /// `fn_registry` or `tsr`. They are wrapped by a `Option`, and will
+    /// only leave a `None` after called `clone_partial()`.
     ///
-    /// This is to making [`Options`] more general and unified. Other fields works as what common
-    /// [`std::marker::Clone`] does.
+    /// This is to making [`Options`] more general and unified. Other fields
+    /// works as what common [`std::marker::Clone`] does.
     /// # Example
-    /// *Just a example and it isn't runnable since `fn_registry` is a private field.*
-    /// ```compile_fail
+    /// *Just a example and it isn't runnable since `fn_registry` is a private
+    /// field.* ```compile_fail
     /// # use helixdb::option::Options;
     /// let options = Options::default();
     /// assert!(options.fn_registry.is_some());
@@ -117,8 +119,8 @@ impl Options {
 
 #[derive(Clone, Copy)]
 pub struct ReadOption {
-    /// Read request will decompress a compressed value then try to find requested timestamp
-    /// if true. Default value: true.
+    /// Read request will decompress a compressed value then try to find
+    /// requested timestamp if true. Default value: true.
     pub(crate) decompress: bool,
 }
 
@@ -150,7 +152,8 @@ mod test {
         assert!(options.fn_registry.is_some());
         assert!(options.tsr.is_some());
 
-        // after calling `clone()` some will be `None` because they won't be cloned actually.
+        // after calling `clone()` some will be `None` because they won't be cloned
+        // actually.
         let options_cloned = options.clone_partial();
         assert!(options_cloned.fn_registry.is_none());
         assert!(options_cloned.tsr.is_none());

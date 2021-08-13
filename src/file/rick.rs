@@ -43,10 +43,10 @@ pub struct Rick {
 impl Rick {
     /// Open a `Rick` from given file.
     ///
-    /// Optional parameter `value_format` will be used to initialize a rick file.
-    /// If the rick file is not empty it will be ignored. If `None` is provided,
-    /// the `value_format` field in super block will be set to default value, which is
-    /// `RawValue`.
+    /// Optional parameter `value_format` will be used to initialize a rick
+    /// file. If the rick file is not empty it will be ignored. If `None` is
+    /// provided, the `value_format` field in super block will be set to
+    /// default value, which is `RawValue`.
     pub async fn open(file: File, value_format: Option<ValueFormat>) -> Result<Self> {
         let sb = Self::read_super_block(&file, value_format).await?;
 
@@ -57,8 +57,9 @@ impl Rick {
     ///
     /// `sync()` will be called before return.
     ///
-    /// Once this method return, this `append` operation is considered finished on rick file.
-    /// Even if it crashed before returned indices are persist.
+    /// Once this method return, this `append` operation is considered finished
+    /// on rick file. Even if it crashed before returned indices are
+    /// persist.
     ///
     /// Encoding format: | payload length (u64) | payload |
     // todo: is it necessary to return inserted timestamp and key?
@@ -209,9 +210,11 @@ impl Rick {
     ///     "need rewrite" buffer if is, and discard if not.
     /// - Acquire write lock and write those "need rewrite" to the end of file.
     /// Then update index (if have) and sync index (if need).
-    /// - Sync super block to update "start" and "end" pointer to make above change
+    /// - Sync super block to update "start" and "end" pointer to make above
+    ///   change
     /// visible. After this the write l ock can be released.
-    /// - Recycle space occupied by those offset is smaller than "start" pointer.
+    /// - Recycle space occupied by those offset is smaller than "start"
+    ///   pointer.
     pub async fn garbage_collect(&self, range: TimeRange) -> Result<()> {
         // yield control to executor.
         Local::yield_if_needed().await;
@@ -219,7 +222,8 @@ impl Rick {
         todo!()
     }
 
-    // This is a temporary work around. Should be replaced by `garbage_collect()` above.
+    // This is a temporary work around. Should be replaced by `garbage_collect()`
+    // above.
     pub async fn clean(&mut self) -> Result<()> {
         // mark as illegal
         self.sb.legal_offset_start = self.sb.legal_offset_end;

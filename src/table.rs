@@ -26,7 +26,8 @@ impl From<(ThreadId, LevelId)> for TableIdentifier {
 
 /// Provides read methods to SSTable.
 ///
-/// If wants to modify a sstable should upgrade to a writable handle (unimplemented).
+/// If wants to modify a sstable should upgrade to a writable handle
+/// (unimplemented).
 pub struct TableReadHandle {
     memindex: MemIndex,
     sstable: SSTable,

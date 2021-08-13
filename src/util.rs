@@ -53,7 +53,8 @@ impl<C: Comparator, T: KeyExtractor<T>> From<T> for OrderingHelper<C, T> {
 
 #[derive(Eq, PartialEq)]
 /// This comparator returns `Ordering::Equal` for every operands.
-/// Which will ignore the provided left and right bound and result a full table scan.
+/// Which will ignore the provided left and right bound and result a full table
+/// scan.
 ///
 /// # Example
 /// ```rust

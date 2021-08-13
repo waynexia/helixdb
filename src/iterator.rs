@@ -15,7 +15,8 @@ pub trait Iterator {
     fn is_valid(&self) -> bool;
 }
 
-/// Iterate over timestamp. i.e, (ts 0, key 1) -> (ts 1, key 1) -> (ts 2, key 1)...
+/// Iterate over timestamp. i.e, (ts 0, key 1) -> (ts 1, key 1) -> (ts 2, key
+/// 1)...
 ///
 /// "Scan" is achieved via (lots of) `get()`
 pub struct TimeIterator<C: Comparator> {
@@ -39,7 +40,8 @@ impl<C: Comparator> TimeIterator<C> {
         Ok(self.buf.pop())
     }
 
-    /// Valid when inner iterator is valid or its own buffer still contains things.
+    /// Valid when inner iterator is valid or its own buffer still contains
+    /// things.
     pub(crate) fn is_valid(&self) -> bool {
         self.inner.is_valid() || !self.buf.is_empty()
     }

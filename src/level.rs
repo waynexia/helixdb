@@ -35,8 +35,9 @@ pub struct LevelConfig {
     pub level_duration: u64,
 }
 
-/// APIs require unique reference (&mut self) because this `Level` is designed to be used
-/// inside one thread (!Send). The fields should also be !Send if possible.
+/// APIs require unique reference (&mut self) because this `Level` is designed
+/// to be used inside one thread (!Send). The fields should also be !Send if
+/// possible.
 pub(crate) struct Levels {
     tid: ThreadId,
     // todo: remove this mutex
@@ -239,8 +240,9 @@ impl Levels {
                         .await?;
                     // table file is empty, means this level haven't finished it compaction. Need to
                     // read value from L0 rick.
-                    // But this check (via file's size) is not good. the write operation may not guarantee to be atomic.
-                    // todo: add a flag to indicate whether a compact is finished.
+                    // But this check (via file's size) is not good. the write operation may not
+                    // guarantee to be atomic. todo: add a flag to indicate
+                    // whether a compact is finished.
                     if table_file.size().await? == 0 {
                         return self.get_from_rick(time_key).await;
                     }
@@ -494,8 +496,8 @@ impl std::fmt::Debug for Levels {
 }
 
 /// "Timestamp" in `HelixDB` is a logical concept. It is not bound with the real
-/// time. [TimestampReviewer] defines how timestamp should be considered. Including
-/// when to do a compaction, when to outdate a part of data etc.
+/// time. [TimestampReviewer] defines how timestamp should be considered.
+/// Including when to do a compaction, when to outdate a part of data etc.
 pub trait TimestampReviewer: Send + Sync {
     fn observe(&mut self, timestamp: Timestamp) -> Vec<TimestampAction>;
 }
@@ -505,7 +507,8 @@ pub trait TimestampReviewer: Send + Sync {
 pub enum TimestampAction {
     /// Compact data between two timestamps (both inclusive).
     /// The third parameter is the id of new level. This field is filled by the
-    /// peer who observed this original "compact action" (sent by `TimestampReviewer`).
+    /// peer who observed this original "compact action" (sent by
+    /// `TimestampReviewer`).
     Compact(Timestamp, Timestamp, Option<LevelId>),
     /// Outdate data which timestamp is smaller than given.
     Outdate(Timestamp),

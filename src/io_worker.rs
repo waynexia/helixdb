@@ -83,8 +83,9 @@ impl IOWorker {
             .detach();
         }
 
-        // the `Error` case of `Gate::spawn()` is glommio runtime cannot find given task queue
-        // which needn't to take into consideration since we don't specify task queue.
+        // the `Error` case of `Gate::spawn()` is glommio runtime cannot find given task
+        // queue which needn't to take into consideration since we don't specify
+        // task queue.
         while let Some(task) = rx.recv().await {
             match task {
                 Task::Put(entries, tx) => {
@@ -167,7 +168,8 @@ mod test {
     use glommio::channels::channel_mesh::{Full, MeshBuilder};
     use glommio::LocalExecutorBuilder;
 
-    // todo: investigate this. The receiver will receive lots of message from "peer 0" without any sender.
+    // todo: investigate this. The receiver will receive lots of message from "peer
+    // 0" without any sender.
     #[test]
     #[ignore]
     fn channel_mesh_select_recv_loop() {

@@ -39,10 +39,12 @@ impl Default for CacheConfig {
 }
 
 /// # Entry Cache
-/// There are three types of entry cache: kv (for Key to Value), kc (for Key to Compressed
-/// value bytes) and kp (for Key to corresponding value's Position in value log).
+/// There are three types of entry cache: kv (for Key to Value), kc (for Key to
+/// Compressed value bytes) and kp (for Key to corresponding value's Position in
+/// value log).
 ///
-/// As the total space for caching is limited, cache small and frequent (or hot) is better.
+/// As the total space for caching is limited, cache small and frequent (or hot)
+/// is better.
 pub struct Cache {
     config: CacheConfig,
     handle_cache: RefCell<LruCache<TableIdentifier, Rc<TableReadHandle>>>,

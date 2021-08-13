@@ -65,8 +65,8 @@ impl SSTableSuperBlock {
 
         // the un-padding bytes should shorter than 4096 otherwise it will be truncated.
         debug_assert!(padding_bytes.len() <= Self::LENGTH);
-        // padding it. Flatbuffers has the information about payload's length, so tailing
-        // zero doesn't matter.
+        // padding it. Flatbuffers has the information about payload's length, so
+        // tailing zero doesn't matter.
         padding_bytes.resize(Self::LENGTH, 0);
         padding_bytes
     }
@@ -80,7 +80,6 @@ impl SSTableSuperBlock {
             };
         }
 
-        // let fb_blocks = flatbuffers::get_root::<protos::SSTableSuperBlock<'_>>(bytes);
         let fb_blocks = flatbuffers::root::<protos::SSTableSuperBlock<'_>>(bytes).unwrap();
         let thread_id = fb_blocks.thread_id().unwrap().id();
         let level_id = fb_blocks.level_id().unwrap().id();
