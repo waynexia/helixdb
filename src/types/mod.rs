@@ -8,7 +8,7 @@ mod level_info;
 mod rick;
 pub mod sstable;
 
-pub use entry::{Bytes, Entry, EntryMeta, LevelId, ThreadId, TimeRange, Timestamp};
+pub use entry::{Bytes, BytesRef, Entry, EntryMeta, LevelId, ThreadId, TimeRange, Timestamp};
 pub use level_info::{LevelDesc, LevelInfo};
 pub(crate) use rick::{Offset, RickSuperBlock, ValueFormat};
 

@@ -5,6 +5,7 @@ use std::ops::Range;
 use flatbuffers::FlatBufferBuilder;
 
 pub type Bytes = Vec<u8>;
+pub type BytesRef<'a> = &'a [u8];
 pub type Timestamp = i64;
 pub type ThreadId = u64;
 /// Mono-increase identifier to level files. Starts from 1.

@@ -49,7 +49,9 @@ pub(crate) struct Levels {
     level_info: Arc<Mutex<LevelInfo>>,
     cache: Cache,
     write_batch: Rc<WriteBatch>,
-    ts_action_sender: ChannelMeshSender<TimestampAction>,
+    /// This will be `None` when there is only one shard and needn't to
+    /// send action to others.
+    ts_action_sender: Option<ChannelMeshSender<TimestampAction>>,
 }
 
 impl Levels {
@@ -58,7 +60,7 @@ impl Levels {
         opts: Options,
         timestamp_reviewer: Arc<Mutex<Box<dyn TimestampReviewer>>>,
         ctx: Arc<Context>,
-        ts_action_sender: ChannelMeshSender<TimestampAction>,
+        ts_action_sender: Option<ChannelMeshSender<TimestampAction>>,
         level_info: Arc<Mutex<LevelInfo>>,
     ) -> Result<Rc<Self>> {
         let rick_file = ctx.file_manager.open_rick(tid).await?;
@@ -289,13 +291,15 @@ impl Levels {
 
     /// Propagate action to other peers.
     async fn propagate_action(&self, action: TimestampAction) -> Result<()> {
-        for consumer_id in 0..self.ts_action_sender.nr_consumers() {
-            if consumer_id != self.ts_action_sender.peer_id() {
-                self.ts_action_sender
-                    .send_to(consumer_id, action)
-                    .await
-                    // todo: check this unwrap
-                    .unwrap();
+        if let Some(ts_action_sender) = &self.ts_action_sender {
+            for consumer_id in 0..ts_action_sender.nr_consumers() {
+                if consumer_id != ts_action_sender.peer_id() {
+                    ts_action_sender
+                        .send_to(consumer_id, action)
+                        .await
+                        // todo: check this unwrap
+                        .unwrap();
+                }
             }
         }
 
@@ -751,7 +755,7 @@ mod test {
                 Options::default(),
                 timestamp_reviewer,
                 ctx,
-                sender,
+                Some(sender),
                 level_info,
             )
             .await
@@ -815,7 +819,7 @@ mod test {
                 Options::default(),
                 timestamp_reviewer,
                 ctx.clone(),
-                sender,
+                Some(sender),
                 level_info,
             )
             .await
