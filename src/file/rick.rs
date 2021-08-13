@@ -347,7 +347,7 @@ mod test {
 
         ex.run(async {
             let base_dir = tempdir().unwrap();
-            let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
+            let file_manager = FileManager::with_base_dir(base_dir.path(), 1).unwrap();
             let rick_file = file_manager.open_rick(1).await.unwrap();
             let mut rick = Rick::open(rick_file, None).await.unwrap();
 
@@ -380,7 +380,7 @@ mod test {
 
         ex.run(async {
             let base_dir = tempdir().unwrap();
-            let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
+            let file_manager = FileManager::with_base_dir(base_dir.path(), 1).unwrap();
             let rick_file = file_manager.open_rick(1).await.unwrap();
             let mut rick = Rick::open(rick_file, None).await.unwrap();
 
@@ -402,7 +402,7 @@ mod test {
 
         ex.run(async {
             let base_dir = tempdir().unwrap();
-            let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
+            let file_manager = FileManager::with_base_dir(base_dir.path(), 1).unwrap();
             let rick_file = file_manager.open_rick(1).await.unwrap();
             let mut rick = Rick::open(rick_file, None).await.unwrap();
 
@@ -434,7 +434,7 @@ mod test {
 
         ex.run(async {
             let base_dir = tempdir().unwrap();
-            let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
+            let file_manager = FileManager::with_base_dir(base_dir.path(), 1).unwrap();
             let rick_file = file_manager.open_rick(1).await.unwrap();
             let mut rick = Rick::open(rick_file, None).await.unwrap();
 

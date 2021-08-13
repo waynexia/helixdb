@@ -6,6 +6,7 @@
 #![feature(async_closure)]
 #![feature(core_intrinsics)]
 #![feature(new_uninit)]
+#![feature(crate_visibility_modifier)]
 // todo: open these lints
 #![allow(dead_code)]
 #![allow(unused_variables)]

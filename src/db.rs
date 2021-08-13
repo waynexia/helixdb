@@ -93,7 +93,7 @@ pub(crate) struct HelixCore {
 
 impl HelixCore {
     fn new<P: AsRef<Path>>(path: P, mut opts: Options) -> Self {
-        let file_manager = FileManager::with_base_dir(path).unwrap();
+        let file_manager = FileManager::with_base_dir(path, opts.num_shard).unwrap();
         let ctx = Arc::new(Context {
             file_manager,
             fn_registry: opts.fn_registry.take().unwrap(),

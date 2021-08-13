@@ -111,7 +111,7 @@ impl LevelInfo {
     }
 
     /// Return new level id.
-    pub async fn add_level(
+    crate async fn add_level(
         &mut self,
         start: Timestamp,
         end: Timestamp,
@@ -127,7 +127,7 @@ impl LevelInfo {
         Ok(next_id)
     }
 
-    pub async fn remove_last_level(&mut self, file_manager: &FileManager) -> Result<()> {
+    crate async fn remove_last_level(&mut self, file_manager: &FileManager) -> Result<()> {
         self.infos.pop_front();
 
         self.sync(file_manager).await
@@ -183,7 +183,7 @@ mod test {
         let ex = LocalExecutor::default();
         ex.run(async {
             let base_dir = tempdir().unwrap();
-            let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
+            let file_manager = FileManager::with_base_dir(base_dir.path(), 1).unwrap();
 
             let mut info = LevelInfo::new(vec![]);
             info.add_level(0, 9, &file_manager).await.unwrap();

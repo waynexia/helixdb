@@ -64,10 +64,10 @@ impl Options {
     /// # use helixdb::option::Options;
     /// let options = Options::default();
     /// assert!(options.fn_registry.is_some());
-    /// // after calling `clone_partial()` some will be `None` because they won't be cloned actually.
-    /// let options_cloned = options.clone_partial();
-    /// assert!(options_cloned.fn_registry.is_none());
-    /// ```
+    /// // after calling `clone_partial()` some will be `None` because they
+    /// won't be cloned actually. let options_cloned =
+    /// options.clone_partial(); assert!(options_cloned.fn_registry.
+    /// is_none()); ```
     pub fn clone_partial(&self) -> Self {
         Self {
             num_shard: self.num_shard,

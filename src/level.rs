@@ -734,7 +734,7 @@ mod test {
         let ex = LocalExecutor::default();
         ex.run(async {
             let base_dir = tempdir().unwrap();
-            let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
+            let file_manager = FileManager::with_base_dir(base_dir.path(), 1).unwrap();
             let fn_registry = FnRegistry::new_noop();
             let ctx = Arc::new(Context {
                 file_manager,
@@ -798,7 +798,7 @@ mod test {
         let ex = LocalExecutor::default();
         ex.run(async {
             let base_dir = tempdir().unwrap();
-            let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
+            let file_manager = FileManager::with_base_dir(base_dir.path(), 1).unwrap();
             let fn_registry = FnRegistry::new_noop();
             let ctx = Arc::new(Context {
                 file_manager,
