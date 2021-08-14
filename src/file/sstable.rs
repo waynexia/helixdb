@@ -1,10 +1,11 @@
+use std::rc::Rc;
 use std::sync::Arc;
 
 use tracing::error;
 
 use crate::context::Context;
 use crate::error::{HelixError, Result};
-use crate::file::Rick;
+use crate::file::{FileNo, Rick};
 use crate::index::MemIndex;
 use crate::io::File;
 use crate::table::TableReadHandle;
@@ -13,12 +14,12 @@ use crate::types::{Bytes, LevelId, Offset, ThreadId, Timestamp};
 use crate::util::{check_bytes_length, decode_u64, encode_u64};
 
 pub struct SSTable {
-    file: File,
+    file: Rc<File>,
     sb: SSTableSuperBlock,
 }
 
 impl SSTable {
-    pub async fn open(file: File) -> Result<Self> {
+    pub async fn open(file: Rc<File>) -> Result<Self> {
         let sb = Self::read_super_block(&file).await?;
 
         Ok(Self { file, sb })
@@ -44,18 +45,12 @@ impl SSTable {
         // open rick file
         let rick_file = ctx
             .file_manager
-            .open_vlog(self.sb.thread_id, self.sb.level_id)
+            .open(self.sb.thread_id, FileNo::Rick(self.sb.level_id))
             .await?;
         let rick = Rick::open(rick_file, None).await?;
 
         let handle = TableReadHandle::new(memindex, self, rick, ctx);
         Ok(handle)
-    }
-
-    pub async fn close(self) -> Result<()> {
-        self.file.close().await?;
-
-        Ok(())
     }
 
     /// Read super block from the first 4KB block of file.
@@ -90,7 +85,7 @@ impl SSTable {
 pub struct TableBuilder {
     thread_id: ThreadId,
     level_id: LevelId,
-    file: File,
+    file: Rc<File>,
     block_buffer: Bytes,
     blocks: Vec<BlockInfo>,
     tail_offset: Offset,
@@ -98,7 +93,7 @@ pub struct TableBuilder {
 
 impl TableBuilder {
     /// Start to build table.
-    pub fn begin(thread_id: ThreadId, level_id: LevelId, file: File) -> Self {
+    pub fn begin(thread_id: ThreadId, level_id: LevelId, file: Rc<File>) -> Self {
         Self {
             thread_id,
             level_id,
@@ -143,7 +138,6 @@ impl TableBuilder {
             .await?;
 
         self.file.sync().await?;
-        self.file.close().await?;
 
         Ok(())
     }
@@ -257,13 +251,16 @@ mod test {
         let ex = LocalExecutor::default();
         ex.run(async {
             let base_dir = tempdir().unwrap();
-            let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
+            let file_manager = FileManager::with_base_dir(base_dir.path(), 1).unwrap();
             let ctx = Arc::new(Context {
                 file_manager,
                 fn_registry: FnRegistry::new_noop(),
             });
-            let mut table_builder =
-                TableBuilder::begin(1, 1, ctx.file_manager.open_sstable(1, 1).await.unwrap());
+            let mut table_builder = TableBuilder::begin(
+                0,
+                1,
+                ctx.file_manager.open(0, FileNo::SSTable(1)).await.unwrap(),
+            );
             let mut index_bb = IndexBlockBuilder::new();
 
             let indices = vec![
@@ -278,12 +275,13 @@ mod test {
             table_builder.add_block(index_bb);
             table_builder.finish().await.unwrap();
 
-            let table_handle = SSTable::open(ctx.file_manager.open_sstable(1, 1).await.unwrap())
-                .await
-                .unwrap()
-                .into_read_handle(ctx)
-                .await
-                .unwrap();
+            let table_handle =
+                SSTable::open(ctx.file_manager.open(0, FileNo::SSTable(1)).await.unwrap())
+                    .await
+                    .unwrap()
+                    .into_read_handle(ctx)
+                    .await
+                    .unwrap();
 
             for index in indices {
                 assert_eq!(

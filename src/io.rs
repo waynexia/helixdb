@@ -1,3 +1,4 @@
+use std::os::unix::prelude::{AsRawFd, RawFd};
 use std::path::Path;
 
 use glommio::io::{DmaFile, OpenOptions};
@@ -69,5 +70,11 @@ impl File {
         self.0.close().await?;
 
         Ok(())
+    }
+}
+
+impl AsRawFd for File {
+    fn as_raw_fd(&self) -> RawFd {
+        self.0.as_raw_fd()
     }
 }

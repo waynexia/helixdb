@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::rc::Rc;
 use std::time::Instant;
 use std::usize;
 
@@ -36,7 +37,7 @@ use crate::util::check_bytes_length;
 /// Rick can be either ordered or disordered, dependents on which level
 /// it sites.
 pub struct Rick {
-    file: File,
+    file: Rc<File>,
     sb: RickSuperBlock,
 }
 
@@ -47,7 +48,7 @@ impl Rick {
     /// file. If the rick file is not empty it will be ignored. If `None` is
     /// provided, the `value_format` field in super block will be set to
     /// default value, which is `RawValue`.
-    pub async fn open(file: File, value_format: Option<ValueFormat>) -> Result<Self> {
+    pub async fn open(file: Rc<File>, value_format: Option<ValueFormat>) -> Result<Self> {
         let sb = Self::read_super_block(&file, value_format).await?;
 
         Ok(Self { file, sb })
@@ -195,12 +196,6 @@ impl Rick {
         Ok(())
     }
 
-    pub async fn close(self) -> Result<()> {
-        self.file.close().await?;
-
-        Ok(())
-    }
-
     /// Recycle entries in given `range` by free them using `fallocate` syscall.
     ///
     /// The general procedure would be like:
@@ -340,6 +335,7 @@ mod test {
 
     use super::*;
     use crate::file::file_manager::FileManager;
+    use crate::file::FileNo;
 
     #[test]
     fn new_super_block() {
@@ -347,8 +343,8 @@ mod test {
 
         ex.run(async {
             let base_dir = tempdir().unwrap();
-            let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
-            let rick_file = file_manager.open_rick(1).await.unwrap();
+            let file_manager = FileManager::with_base_dir(base_dir.path(), 1).unwrap();
+            let rick_file = file_manager.open(0, FileNo::Rick(0)).await.unwrap();
             let mut rick = Rick::open(rick_file, None).await.unwrap();
 
             assert_eq!(RickSuperBlock::LENGTH, rick.start() as usize);
@@ -366,7 +362,8 @@ mod test {
 
             // close and open again
             drop(rick);
-            let rick_file = file_manager.open_rick(1).await.unwrap();
+            file_manager.close_some(0).await.unwrap();
+            let rick_file = file_manager.open(0, FileNo::Rick(0)).await.unwrap();
             let rick = Rick::open(rick_file, None).await.unwrap();
 
             assert_eq!(RickSuperBlock::LENGTH, rick.start() as usize);
@@ -380,8 +377,8 @@ mod test {
 
         ex.run(async {
             let base_dir = tempdir().unwrap();
-            let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
-            let rick_file = file_manager.open_rick(1).await.unwrap();
+            let file_manager = FileManager::with_base_dir(base_dir.path(), 1).unwrap();
+            let rick_file = file_manager.open(0, FileNo::Rick(0)).await.unwrap();
             let mut rick = Rick::open(rick_file, None).await.unwrap();
 
             let entry = Entry {
@@ -402,8 +399,8 @@ mod test {
 
         ex.run(async {
             let base_dir = tempdir().unwrap();
-            let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
-            let rick_file = file_manager.open_rick(1).await.unwrap();
+            let file_manager = FileManager::with_base_dir(base_dir.path(), 1).unwrap();
+            let rick_file = file_manager.open(0, FileNo::Rick(0)).await.unwrap();
             let mut rick = Rick::open(rick_file, None).await.unwrap();
 
             let entries = vec![
@@ -434,8 +431,8 @@ mod test {
 
         ex.run(async {
             let base_dir = tempdir().unwrap();
-            let file_manager = FileManager::with_base_dir(base_dir.path()).unwrap();
-            let rick_file = file_manager.open_rick(1).await.unwrap();
+            let file_manager = FileManager::with_base_dir(base_dir.path(), 1).unwrap();
+            let rick_file = file_manager.open(0, FileNo::Rick(0)).await.unwrap();
             let mut rick = Rick::open(rick_file, None).await.unwrap();
 
             let mut entries = vec![

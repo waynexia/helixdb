@@ -124,3 +124,7 @@ pub fn check_bytes_length(data: &[u8], length: usize) -> Result<()> {
         Err(HelixError::IncompatibleLength(length, data.len()))
     }
 }
+
+crate trait AssertSend: Send {}
+
+crate trait AssertSync: Sync {}

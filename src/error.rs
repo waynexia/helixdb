@@ -30,4 +30,6 @@ pub enum HelixError {
     IncompatibleLength(usize, usize),
     #[error("Helix is closed")]
     Closed,
+    #[error("Running into unreachable situation {0}")]
+    Unreachable(String),
 }
