@@ -160,24 +160,7 @@ impl FileManager {
         Ok(())
     }
 
-    crate async fn open_sstable(&self, tid: ThreadId, level_id: LevelId) -> Result<File> {
-        let filename = self.base_dir.join(format!(
-            "{}-{}-{}.{}",
-            "sst", tid, level_id, BINARY_FILE_EXTENSION,
-        ));
-
-        Ok(File::open(filename).await?)
-    }
-
-    crate async fn open_vlog(&self, tid: ThreadId, level_id: LevelId) -> Result<File> {
-        let filename = self.base_dir.join(format!(
-            "{}-{}-{}.{}",
-            "vlog", tid, level_id, BINARY_FILE_EXTENSION,
-        ));
-
-        Ok(File::open(filename).await?)
-    }
-
+    // todo: deprecate this.
     /// Open or create [LevelInfo].
     crate async fn open_level_info(&self) -> Result<LevelInfo> {
         let filename = self.base_dir.join(LEVEL_INFO_FILENAME);

@@ -81,10 +81,7 @@ impl Cache {
         table_id: TableIdentifier,
         handle: Rc<TableReadHandle>,
     ) -> Result<()> {
-        let outdated = self.handle_cache.borrow_mut().put(table_id, handle);
-        if let Some(handle) = outdated {
-            handle.try_close().await?;
-        }
+        self.handle_cache.borrow_mut().put(table_id, handle);
 
         Ok(())
     }

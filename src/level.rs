@@ -240,7 +240,7 @@ impl Levels {
                     let table_file = self
                         .ctx
                         .file_manager
-                        .open_sstable(self.tid, level_id)
+                        .open(self.tid, FileNo::SSTable(level_id))
                         .await?;
                     // table file is empty, means this level haven't finished it compaction. Need to
                     // read value from L0 rick.
@@ -264,7 +264,6 @@ impl Levels {
 
                 let entry = handle.get(time_key).await?;
                 let is_compressed = handle.is_compressed();
-                handle.try_close().await?;
                 // update cache
                 if let Some(mut entry) = entry {
                     if is_compressed {
@@ -370,7 +369,7 @@ impl Levels {
             level_id,
             self.ctx
                 .file_manager
-                .open_sstable(self.tid, level_id)
+                .open(self.tid, FileNo::SSTable(level_id))
                 .await?,
         );
 
