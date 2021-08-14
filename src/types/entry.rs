@@ -164,10 +164,10 @@ mod test {
     fn time_range_contains() {
         let range = TimeRange::from((0, 10));
 
-        assert_eq!(false, range.contains(-1));
-        assert_eq!(true, range.contains(0));
-        assert_eq!(true, range.contains(5));
-        assert_eq!(true, range.contains(10));
-        assert_eq!(false, range.contains(101));
+        assert!(!range.contains(-1));
+        assert!(range.contains(0));
+        assert!(range.contains(5));
+        assert!(range.contains(10));
+        assert!(!range.contains(101));
     }
 }
