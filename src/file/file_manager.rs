@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::warn;
 
-use crate::error::Result;
+use crate::error::{HelixError, Result};
 use crate::io::File;
 use crate::types::{Bytes, LevelId, LevelInfo, ThreadId};
 use crate::util::{AssertSend, AssertSync};
@@ -82,7 +82,7 @@ impl AssertSync for FileManager {}
 impl AssertSend for FileManager {}
 
 impl FileManager {
-    pub fn with_base_dir<P: AsRef<Path>>(base_dir: P, shards: usize) -> Result<Self> {
+    crate fn with_base_dir<P: AsRef<Path>>(base_dir: P, shards: usize) -> Result<Self> {
         fs::create_dir_all(base_dir.as_ref())?;
 
         // check dir
@@ -130,30 +130,37 @@ impl FileManager {
         Ok(file)
     }
 
-    // might deprecate this.
-    /// Create files in `Others` type. Like `LEVEL_INFO`.
-    async fn create_others(&self, filename: String) -> Result<(File, String)> {
-        let filename = self.base_dir.join(filename);
-        let file = File::open(filename.clone()).await?;
-        let filename = filename.into_os_string().into_string().unwrap();
+    /// Close files not used by others, i.e., strong count is 1.
+    ///
+    /// # Notice
+    /// As [FileManager] is shared between all shards, it keep all files that
+    /// should not be visible to other shards. Trying to close with wrong `tid`
+    /// is undefined behavior.
+    crate async fn close_some(&self, tid: ThreadId) -> Result<()> {
+        let free_list = self
+            .fd_pool
+            .lock()
+            .await
+            .drain_filter(|(thread_id, _), file| {
+                *thread_id == tid && Rc::strong_count(&file.0) == 1
+            })
+            .collect::<Vec<_>>();
 
-        Ok((file, filename))
+        for (_, file) in free_list {
+            match Rc::try_unwrap(file.0) {
+                Ok(file) => file.close().await?,
+                Err(file) => {
+                    return Err(HelixError::Unreachable(
+                        "Going to close a file which is still referenced".to_string(),
+                    ));
+                }
+            }
+        }
+
+        Ok(())
     }
 
-    /// Initialize / recover manager's state from manifest file.
-    fn init() -> Result<()> {
-        todo!()
-    }
-
-    pub async fn open_rick(&self, tid: ThreadId) -> Result<File> {
-        let filename = self
-            .base_dir
-            .join(format!("{}-{}.{}", "rick", tid, BINARY_FILE_EXTENSION));
-
-        Ok(File::open(filename).await?)
-    }
-
-    pub async fn open_sstable(&self, tid: ThreadId, level_id: LevelId) -> Result<File> {
+    crate async fn open_sstable(&self, tid: ThreadId, level_id: LevelId) -> Result<File> {
         let filename = self.base_dir.join(format!(
             "{}-{}-{}.{}",
             "sst", tid, level_id, BINARY_FILE_EXTENSION,
@@ -162,7 +169,7 @@ impl FileManager {
         Ok(File::open(filename).await?)
     }
 
-    pub async fn open_vlog(&self, tid: ThreadId, level_id: LevelId) -> Result<File> {
+    crate async fn open_vlog(&self, tid: ThreadId, level_id: LevelId) -> Result<File> {
         let filename = self.base_dir.join(format!(
             "{}-{}-{}.{}",
             "vlog", tid, level_id, BINARY_FILE_EXTENSION,
@@ -172,7 +179,7 @@ impl FileManager {
     }
 
     /// Open or create [LevelInfo].
-    pub async fn open_level_info(&self) -> Result<LevelInfo> {
+    crate async fn open_level_info(&self) -> Result<LevelInfo> {
         let filename = self.base_dir.join(LEVEL_INFO_FILENAME);
         let file = File::open(filename).await?;
 
@@ -187,7 +194,7 @@ impl FileManager {
 
     // todo: correct this.
     /// Refresh (overwrite) level info file.
-    pub async fn sync_level_info(&self, bytes: Bytes) -> Result<()> {
+    crate async fn sync_level_info(&self, bytes: Bytes) -> Result<()> {
         let filename = self.base_dir.join(LEVEL_INFO_FILENAME);
         let file = File::open(filename).await?;
 
@@ -212,11 +219,10 @@ mod test {
     fn new_file_manager() {
         let ex = LocalExecutor::default();
         let base_dir = tempdir().unwrap();
-        let file_manager = FileManager::with_base_dir(base_dir.path(), 1).unwrap();
+        let file_manager = FileManager::with_base_dir(base_dir.path(), 8).unwrap();
 
         ex.run(async {
-            let _ = file_manager.open_rick(1).await.unwrap();
-            assert_eq!(base_dir.path().read_dir().unwrap().count(), 1);
+            assert_eq!(base_dir.path().read_dir().unwrap().count(), 8);
         });
     }
 

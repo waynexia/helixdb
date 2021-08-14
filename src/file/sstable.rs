@@ -4,7 +4,7 @@ use tracing::error;
 
 use crate::context::Context;
 use crate::error::{HelixError, Result};
-use crate::file::Rick;
+use crate::file::{FileNo, Rick};
 use crate::index::MemIndex;
 use crate::io::File;
 use crate::table::TableReadHandle;
@@ -44,7 +44,7 @@ impl SSTable {
         // open rick file
         let rick_file = ctx
             .file_manager
-            .open_vlog(self.sb.thread_id, self.sb.level_id)
+            .open(self.sb.thread_id, FileNo::Rick(self.sb.level_id))
             .await?;
         let rick = Rick::open(rick_file, None).await?;
 
@@ -263,7 +263,7 @@ mod test {
                 fn_registry: FnRegistry::new_noop(),
             });
             let mut table_builder =
-                TableBuilder::begin(1, 1, ctx.file_manager.open_sstable(1, 1).await.unwrap());
+                TableBuilder::begin(0, 1, ctx.file_manager.open_sstable(1, 1).await.unwrap());
             let mut index_bb = IndexBlockBuilder::new();
 
             let indices = vec![

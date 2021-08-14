@@ -17,7 +17,7 @@ use tracing::{debug, instrument, trace};
 use crate::cache::{Cache, KeyCacheEntry, KeyCacheResult};
 use crate::context::Context;
 use crate::error::{HelixError, Result};
-use crate::file::{IndexBlockBuilder, Rick, SSTable, TableBuilder};
+use crate::file::{FileNo, IndexBlockBuilder, Rick, SSTable, TableBuilder};
 use crate::index::MemIndex;
 use crate::io_worker;
 use crate::option::{Options, ReadOption};
@@ -61,7 +61,8 @@ impl Levels {
         ts_action_sender: ChannelMeshSender<TimestampAction>,
         level_info: Arc<Mutex<LevelInfo>>,
     ) -> Result<Rc<Self>> {
-        let rick_file = ctx.file_manager.open_rick(tid).await?;
+        // todo: remove the default rick. the number in `FileNo::Rick` shouldn't be 0.
+        let rick_file = ctx.file_manager.open(tid, FileNo::Rick(0)).await.unwrap();
         let rick = Rick::open(rick_file, Some(ValueFormat::RawValue)).await?;
         let memindex = rick.construct_index().await?;
 
@@ -206,10 +207,13 @@ impl Levels {
                 }))
             }
             KeyCacheResult::Position(tid, level_id, offset) => {
-                let rick_file = self.ctx.file_manager.open_vlog(tid, level_id).await?;
+                let rick_file = self
+                    .ctx
+                    .file_manager
+                    .open(tid, FileNo::Rick(level_id))
+                    .await?;
                 let rick = Rick::open(rick_file, None).await?;
                 let raw_bytes = rick.read(offset as u64).await?;
-                rick.close().await?;
 
                 let value = ok_unwrap!(self.decompress_and_find(
                     time_key,
@@ -396,8 +400,12 @@ impl Levels {
 
         // prepare output files.
         let mut index_bb = IndexBlockBuilder::new();
-        let rick = self.ctx.file_manager.open_vlog(self.tid, level_id).await?;
-        let mut rick = Rick::open(rick, Some(ValueFormat::CompressedValue)).await?;
+        let rick_file = self
+            .ctx
+            .file_manager
+            .open(self.tid, FileNo::Rick(level_id))
+            .await?;
+        let mut rick = Rick::open(rick_file, Some(ValueFormat::CompressedValue)).await?;
         rick.set_align_ts(range.start()).await?;
 
         // call compress_fn to compact points, build rick file and index block.
@@ -421,7 +429,6 @@ impl Levels {
             let (timestamp, key, offset) = position.pop().unwrap();
             index_bb.add_entry(&key, timestamp, offset);
         }
-        rick.close().await?;
 
         trace!("[compact] level {}, build rick", level_id);
 
@@ -747,7 +754,7 @@ mod test {
                 ctx.file_manager.open_level_info().await.unwrap(),
             ));
             let levels = Levels::try_new(
-                1,
+                0,
                 Options::default(),
                 timestamp_reviewer,
                 ctx,
@@ -811,7 +818,7 @@ mod test {
                 ctx.file_manager.open_level_info().await.unwrap(),
             ));
             let levels = Levels::try_new(
-                1,
+                0,
                 Options::default(),
                 timestamp_reviewer,
                 ctx.clone(),

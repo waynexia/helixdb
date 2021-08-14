@@ -70,7 +70,7 @@ impl TableReadHandle {
     }
 
     pub async fn close(self) -> Result<()> {
-        self.rick.close().await?;
+        // self.rick.close().await?;
         self.sstable.close().await?;
 
         Ok(())
