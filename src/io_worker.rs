@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 use glommio::channels::channel_mesh::{
@@ -7,12 +7,13 @@ use glommio::channels::channel_mesh::{
     Senders as ChannelMeshSender,
 };
 use glommio::sync::Gate;
-use glommio::Task as GlommioTask;
+use glommio::{Latency, Local, Shares, Task as GlommioTask};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::oneshot::Sender as Notifier;
 use tokio::sync::Mutex;
 use tracing::trace;
 
+use crate::compact_sched::QueueUpCompSched;
 use crate::context::Context;
 use crate::error::Result;
 use crate::level::{Levels, TimestampReviewer};
@@ -46,13 +47,23 @@ impl IOWorker {
         ctx: Arc<Context>,
         ts_action_sender: ChannelMeshSender<TimestampAction>,
     ) -> Result<Self> {
+        let level_weak = Weak::new();
+        let compact_task_queue =
+            Local::create_task_queue(Shares::default(), Latency::NotImportant, "compact_tq");
+        let sched = Rc::new(QueueUpCompSched::new(
+            opts.compact_prompt_interval,
+            2,
+            level_weak,
+            compact_task_queue,
+        ));
         let levels = Levels::try_new(
             tid,
-            opts,
+            opts.clone(),
             timestamp_reviewer,
             ctx,
             ts_action_sender,
             level_info,
+            sched,
         )
         .await?;
 
@@ -132,6 +143,14 @@ impl IOWorker {
                 }
             }
         }
+    }
+
+    fn install_comp_sched(&self, sched: Rc<QueueUpCompSched>) -> Result<()> {
+        let compact_task_queue =
+            Local::create_task_queue(Shares::default(), Latency::NotImportant, "compact_tq");
+        sched.install(compact_task_queue)?;
+
+        Ok(())
     }
 }
 

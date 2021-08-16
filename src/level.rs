@@ -15,6 +15,7 @@ use tokio::sync::Mutex;
 use tracing::{debug, instrument, trace};
 
 use crate::cache::{Cache, KeyCacheEntry, KeyCacheResult};
+use crate::compact_sched::QueueUpCompSched;
 use crate::context::Context;
 use crate::error::{HelixError, Result};
 use crate::file::{FileNo, IndexBlockBuilder, Rick, SSTable, TableBuilder};
@@ -50,6 +51,7 @@ pub(crate) struct Levels {
     cache: Cache,
     write_batch: Rc<WriteBatch>,
     ts_action_sender: ChannelMeshSender<TimestampAction>,
+    compact_sched: Rc<QueueUpCompSched>,
 }
 
 impl Levels {
@@ -60,6 +62,7 @@ impl Levels {
         ctx: Arc<Context>,
         ts_action_sender: ChannelMeshSender<TimestampAction>,
         level_info: Arc<Mutex<LevelInfo>>,
+        compact_sched: Rc<QueueUpCompSched>,
     ) -> Result<Rc<Self>> {
         // todo: remove the default rick. the number in `FileNo::Rick` shouldn't be 0.
         let rick_file = ctx.file_manager.open(tid, FileNo::Rick(0)).await.unwrap();
@@ -79,6 +82,7 @@ impl Levels {
             cache,
             write_batch: Rc::new(write_batch),
             ts_action_sender,
+            compact_sched,
         };
 
         let levels = Rc::new(levels);
@@ -352,7 +356,7 @@ impl Levels {
     ///
     /// todo: how to handle rick file is not fully covered by given time range?.
     #[instrument]
-    async fn compact(&self, range: TimeRange, level_id: LevelId) -> Result<()> {
+    crate async fn compact(&self, range: TimeRange, level_id: LevelId) -> Result<()> {
         // Keep the gate open until compact finished. The question mark (try) indicates
         // a early return once it's failed to spawn to the gate.
         let (tx, rx) = glommio::channels::local_channel::new_bounded(1);
@@ -455,6 +459,11 @@ impl Levels {
         let _ = tx.send(()).await;
 
         Ok(())
+    }
+
+    #[instrument]
+    crate async fn compact_level(&self, level_id: LevelId) -> Result<()> {
+        todo!()
     }
 
     async fn outdate(&self) -> Result<()> {
@@ -759,6 +768,7 @@ mod test {
                 ctx,
                 sender,
                 level_info,
+                Rc::new(QueueUpCompSched::default()),
             )
             .await
             .unwrap();
@@ -823,6 +833,7 @@ mod test {
                 ctx.clone(),
                 sender,
                 level_info,
+                Rc::new(QueueUpCompSched::default()),
             )
             .await
             .unwrap();

@@ -48,6 +48,7 @@ macro_rules! ok_unwrap {
 #[deprecated]
 mod blocks;
 mod cache;
+mod compact_sched;
 mod context;
 mod db;
 mod error;

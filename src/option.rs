@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crate::cache::CacheConfig;
 use crate::fn_registry::FnRegistry;
 use crate::level::{SimpleTimestampReviewer, TimestampReviewer, WriteBatchConfig};
@@ -15,12 +17,15 @@ pub struct Options {
     pub(crate) cache: CacheConfig,
     ///
     pub(crate) write_batch: WriteBatchConfig,
+    ///
+    pub(crate) compact_prompt_interval: Duration,
 
     // helixdb context
     pub(crate) fn_registry: Option<FnRegistry>,
     pub(crate) tsr: Option<Box<dyn TimestampReviewer>>,
 }
 
+// todo: remove this
 impl Clone for Options {
     /// a
     fn clone(&self) -> Self {
@@ -29,6 +34,7 @@ impl Clone for Options {
             task_buffer_size: self.task_buffer_size,
             cache: self.cache,
             write_batch: self.write_batch,
+            compact_prompt_interval: self.compact_prompt_interval,
 
             fn_registry: None,
             tsr: None,
@@ -43,6 +49,7 @@ impl Options {
             task_buffer_size: 128,
             cache: CacheConfig::default(),
             write_batch: WriteBatchConfig::default(),
+            compact_prompt_interval: Duration::from_secs(1),
 
             fn_registry: Some(FnRegistry::new_noop()),
             tsr: Some(Box::new(SimpleTimestampReviewer::new(1024, 1024 * 8))),
@@ -74,6 +81,7 @@ impl Options {
             task_buffer_size: self.task_buffer_size,
             cache: self.cache,
             write_batch: self.write_batch,
+            compact_prompt_interval: self.compact_prompt_interval,
 
             fn_registry: None,
             tsr: None,
@@ -113,6 +121,11 @@ impl Options {
 
     pub fn set_task_buffer_size(mut self, buffer_size: usize) -> Self {
         self.task_buffer_size = buffer_size;
+        self
+    }
+
+    pub fn set_compact_prompt_interval(mut self, interval: Duration) -> Self {
+        self.compact_prompt_interval = interval;
         self
     }
 }
