@@ -32,7 +32,7 @@ crate struct QueueUpCompSched {
     interval: Duration,
     queue: RefCell<VecDeque<LevelId>>,
     delay_num: usize,
-    levels: Weak<Levels>,
+    levels: Weak<Levels<Self>>,
     tq: TaskQueueHandle,
 }
 
@@ -40,7 +40,7 @@ impl QueueUpCompSched {
     crate fn new(
         interval: Duration,
         delay_num: usize,
-        levels: Weak<Levels>,
+        levels: Weak<Levels<Self>>,
         tq: TaskQueueHandle,
     ) -> Self {
         Self {

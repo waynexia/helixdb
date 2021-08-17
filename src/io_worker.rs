@@ -35,7 +35,7 @@ thread_local!(
 /// A un-Send handle to accept and process requests.
 pub struct IOWorker {
     tid: ThreadId,
-    levels: Rc<Levels>,
+    levels: Rc<Levels<QueueUpCompSched>>,
     // todo: maybe add channel mesh for scan
 }
 

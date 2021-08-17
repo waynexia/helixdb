@@ -15,7 +15,7 @@ use tokio::sync::Mutex;
 use tracing::{debug, instrument, trace};
 
 use crate::cache::{Cache, KeyCacheEntry, KeyCacheResult};
-use crate::compact_sched::{CompactScheduler, QueueUpCompSched};
+use crate::compact_sched::CompactScheduler;
 use crate::context::Context;
 use crate::error::{HelixError, Result};
 use crate::file::{FileNo, IndexBlockBuilder, Rick, SSTable, TableBuilder};
@@ -39,7 +39,7 @@ pub struct LevelConfig {
 /// APIs require unique reference (&mut self) because this `Level` is designed
 /// to be used inside one thread (!Send). The fields should also be !Send if
 /// possible.
-pub(crate) struct Levels {
+crate struct Levels<CS: CompactScheduler> {
     tid: ThreadId,
     // todo: remove this mutex
     timestamp_reviewer: Arc<Mutex<Box<dyn TimestampReviewer>>>,
@@ -51,10 +51,10 @@ pub(crate) struct Levels {
     cache: Cache,
     write_batch: Rc<WriteBatch>,
     ts_action_sender: ChannelMeshSender<TimestampAction>,
-    compact_sched: Rc<QueueUpCompSched>,
+    compact_sched: Rc<CS>,
 }
 
-impl Levels {
+impl<CS: CompactScheduler> Levels<CS> {
     pub async fn try_new(
         tid: ThreadId,
         opts: Options,
@@ -62,7 +62,7 @@ impl Levels {
         ctx: Arc<Context>,
         ts_action_sender: ChannelMeshSender<TimestampAction>,
         level_info: Arc<Mutex<LevelInfo>>,
-        compact_sched: Rc<QueueUpCompSched>,
+        compact_sched: Rc<CS>,
     ) -> Result<Rc<Self>> {
         // todo: remove the default rick. the number in `FileNo::Rick` shouldn't be 0.
         let rick_file = ctx.file_manager.open(tid, FileNo::Rick(0)).await.unwrap();
@@ -514,7 +514,7 @@ impl Levels {
     }
 }
 
-impl std::fmt::Debug for Levels {
+impl<CS: CompactScheduler> std::fmt::Debug for Levels<CS> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Levels")
             .field("thread id", &self.tid)
@@ -645,11 +645,11 @@ impl WriteBatch {
     /// Enqueue some write requests. Then check the size limit.
     /// This will reset the timeout timer.
     #[allow(clippy::branches_sharing_code)]
-    pub async fn enqueue(
+    pub async fn enqueue<CS: CompactScheduler>(
         self: Rc<Self>,
         mut reqs: Vec<Entry>,
         tx: Sender<Result<()>>,
-        level: Rc<Levels>,
+        level: Rc<Levels<CS>>,
     ) {
         // enqueue
         let guard = self.lock.lock().await;
@@ -667,7 +667,7 @@ impl WriteBatch {
     }
 
     /// Consume all batched entries.
-    pub async fn consume(self: Rc<Self>, level: Rc<Levels>) {
+    pub async fn consume<CS: CompactScheduler>(self: Rc<Self>, level: Rc<Levels<CS>>) {
         // let mut action_guard = self.action.write().await.unwrap();
         // take contents
         let guard = self.lock.lock().await;
@@ -708,7 +708,7 @@ impl WriteBatch {
         drop(action_guard.take());
     }
 
-    async fn set_or_rearm(self: Rc<Self>, level: Rc<Levels>) {
+    async fn set_or_rearm<CS: CompactScheduler>(self: Rc<Self>, level: Rc<Levels<CS>>) {
         let mut action = self.action.write().await.unwrap();
 
         // rearm timer
@@ -732,6 +732,7 @@ mod test {
     use tempfile::tempdir;
 
     use super::*;
+    use crate::compact_sched::QueueUpCompSched;
     use crate::file::FileManager;
     use crate::fn_registry::FnRegistry;
 
