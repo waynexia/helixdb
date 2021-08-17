@@ -758,7 +758,6 @@ mod test {
     }
 
     #[test]
-    #[ignore = "temp"]
     fn put_get_on_rick() {
         let ex = LocalExecutor::default();
         ex.run(async {
@@ -775,6 +774,7 @@ mod test {
             let level_info = Arc::new(Mutex::new(
                 ctx.file_manager.open_level_info().await.unwrap(),
             ));
+            let (sched, tq) = QueueUpCompSched::default();
             let levels = Levels::try_new(
                 0,
                 Options::default(),
@@ -782,10 +782,12 @@ mod test {
                 ctx,
                 sender,
                 level_info,
-                Rc::new(QueueUpCompSched::default()),
+                sched.clone(),
             )
             .await
             .unwrap();
+            sched.clone().init(levels.clone());
+            sched.install(tq).unwrap();
 
             let entries = vec![
                 (1, b"key1".to_vec(), b"value1".to_vec()).into(),
@@ -824,7 +826,6 @@ mod test {
     }
 
     #[test]
-    #[ignore = "temp"]
     fn put_get_with_compaction() {
         let ex = LocalExecutor::default();
         ex.run(async {
@@ -841,6 +842,7 @@ mod test {
             let level_info = Arc::new(Mutex::new(
                 ctx.file_manager.open_level_info().await.unwrap(),
             ));
+            let (sched, tq) = QueueUpCompSched::default();
             let levels = Levels::try_new(
                 0,
                 Options::default(),
@@ -848,10 +850,12 @@ mod test {
                 ctx.clone(),
                 sender,
                 level_info,
-                Rc::new(QueueUpCompSched::default()),
+                sched.clone(),
             )
             .await
             .unwrap();
+            sched.clone().init(levels.clone());
+            sched.install(tq).unwrap();
 
             for timestamp in 0..25 {
                 levels

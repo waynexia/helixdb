@@ -63,7 +63,6 @@ impl QueueUpCompSched {
         unsafe {
             let empty_rc = mem::replace(
                 &mut (*(Rc::as_ptr(&self) as *mut QueueUpCompSched)).levels,
-                // &mut self.levels,
                 levels.clone(),
             );
             let _ = mem::transmute::<Rc<Levels<QueueUpCompSched>>, Rc<()>>(empty_rc);
@@ -107,8 +106,13 @@ impl QueueUpCompSched {
     /// Any operations make this to call `levels` will panic due to
     /// the attempt of trying to upgrade that empty weak pointer.
     #[cfg(test)]
-    crate fn default() -> Self {
-        Self {
+    crate fn default() -> (Rc<Self>, TaskQueueHandle) {
+        let tq = Local::create_task_queue(
+            glommio::Shares::default(),
+            glommio::Latency::NotImportant,
+            "test_comp_tq",
+        );
+        let this = Self {
             is_compacting: RefCell::new(false),
             interval: Duration::from_secs(1),
             queue: RefCell::new(VecDeque::new()),
@@ -116,12 +120,10 @@ impl QueueUpCompSched {
             levels: unsafe {
                 std::mem::transmute::<Rc<()>, Rc<Levels<QueueUpCompSched>>>(Rc::new(()))
             },
-            tq: Local::create_task_queue(
-                glommio::Shares::default(),
-                glommio::Latency::NotImportant,
-                "test_comp_tq",
-            ),
-        }
+            tq,
+        };
+
+        (Rc::new(this), tq)
     }
 }
 
