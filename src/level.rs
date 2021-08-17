@@ -15,7 +15,7 @@ use tokio::sync::Mutex;
 use tracing::{debug, instrument, trace};
 
 use crate::cache::{Cache, KeyCacheEntry, KeyCacheResult};
-use crate::compact_sched::QueueUpCompSched;
+use crate::compact_sched::{CompactScheduler, QueueUpCompSched};
 use crate::context::Context;
 use crate::error::{HelixError, Result};
 use crate::file::{FileNo, IndexBlockBuilder, Rick, SSTable, TableBuilder};
@@ -337,6 +337,8 @@ impl Levels {
                     };
                     self.compact(TimeRange::from((start_ts, end_ts)), level_id)
                         .await?;
+                    // todo: enable this
+                    // self.compact_sched.enqueue(level_id);
                 }
                 TimestampAction::Outdate(_) => {
                     self.propagate_action(action).await?;
@@ -461,9 +463,19 @@ impl Levels {
         Ok(())
     }
 
+    /// Perform compaction on the given level id.
+    ///
+    /// This procedure assume the level going to compact is inactive, which has
+    /// the level id assigned, has corresponding rick file, and may serving read
+    /// requests.
+    ///
+    /// It's not this procedure's response to switch active level. And it also
+    /// has nothing to do with memindex.
     #[instrument]
     crate async fn compact_level(&self, level_id: LevelId) -> Result<()> {
-        todo!()
+        self.compact_sched.finished(level_id);
+
+        Ok(())
     }
 
     async fn outdate(&self) -> Result<()> {

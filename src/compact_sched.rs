@@ -3,6 +3,7 @@ use std::collections::VecDeque;
 use std::rc::{Rc, Weak};
 use std::time::Duration;
 
+use async_trait::async_trait;
 use glommio::timer::TimerActionRepeat;
 use glommio::{Local, TaskQueueHandle};
 
@@ -10,8 +11,20 @@ use crate::error::Result;
 use crate::level::Levels;
 use crate::types::LevelId;
 
-crate trait CompactScheduler {
-    fn enqueue(&self);
+#[async_trait(?Send)]
+pub(crate) trait CompactScheduler: 'static {
+    fn enqueue(&self, l_id: LevelId);
+
+    fn finished(&self, l_id: LevelId);
+
+    async fn schedule(self: Rc<Self>) -> Option<Duration>;
+
+    fn install(self: Rc<Self>, tq: TaskQueueHandle) -> Result<()> {
+        let sched = self.clone();
+        TimerActionRepeat::repeat_into(move || sched.clone().schedule(), tq)?;
+
+        Ok(())
+    }
 }
 
 crate struct QueueUpCompSched {
@@ -40,11 +53,15 @@ impl QueueUpCompSched {
         }
     }
 
-    crate fn enqueue(&self, l_id: LevelId) {
+    fn enqueue(&self, l_id: LevelId) {
         self.queue.borrow_mut().push_back(l_id);
     }
 
-    crate async fn schedule(self: Rc<Self>) -> Option<Duration> {
+    fn finished(&self, l_id: LevelId) {
+        *self.is_compacting.borrow_mut() = false;
+    }
+
+    async fn schedule(self: Rc<Self>) -> Option<Duration> {
         if *self.is_compacting.borrow() || self.queue.borrow().len() < self.delay_num {
             return Some(self.interval);
         }
@@ -64,13 +81,6 @@ impl QueueUpCompSched {
         .detach();
 
         Some(self.interval)
-    }
-
-    crate fn install(self: Rc<Self>, tq: TaskQueueHandle) -> Result<()> {
-        let sched = self.clone();
-        TimerActionRepeat::repeat_into(move || sched.clone().schedule(), tq)?;
-
-        Ok(())
     }
 
     /// For writing mock test.
@@ -93,5 +103,20 @@ impl QueueUpCompSched {
                 "test_comp_tq",
             ),
         }
+    }
+}
+
+#[async_trait(?Send)]
+impl CompactScheduler for QueueUpCompSched {
+    fn enqueue(&self, l_id: LevelId) {
+        self.enqueue(l_id)
+    }
+
+    fn finished(&self, l_id: LevelId) {
+        self.finished(l_id)
+    }
+
+    async fn schedule(self: Rc<Self>) -> Option<Duration> {
+        self.schedule().await
     }
 }

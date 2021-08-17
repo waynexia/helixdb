@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::ptr;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
@@ -13,7 +14,7 @@ use tokio::sync::oneshot::Sender as Notifier;
 use tokio::sync::Mutex;
 use tracing::trace;
 
-use crate::compact_sched::QueueUpCompSched;
+use crate::compact_sched::{CompactScheduler, QueueUpCompSched};
 use crate::context::Context;
 use crate::error::Result;
 use crate::level::{Levels, TimestampReviewer};
@@ -53,9 +54,10 @@ impl IOWorker {
         let sched = Rc::new(QueueUpCompSched::new(
             opts.compact_prompt_interval,
             2,
-            level_weak,
+            level_weak.clone(),
             compact_task_queue,
         ));
+
         let levels = Levels::try_new(
             tid,
             opts.clone(),
@@ -63,9 +65,14 @@ impl IOWorker {
             ctx,
             ts_action_sender,
             level_info,
-            sched,
+            sched.clone(),
         )
         .await?;
+
+        unsafe {
+            ptr::write(level_weak.as_ptr() as _, Rc::as_ptr(&levels));
+        }
+        sched.install(compact_task_queue)?;
 
         Ok(Self { tid, levels })
     }
@@ -143,14 +150,6 @@ impl IOWorker {
                 }
             }
         }
-    }
-
-    fn install_comp_sched(&self, sched: Rc<QueueUpCompSched>) -> Result<()> {
-        let compact_task_queue =
-            Local::create_task_queue(Shares::default(), Latency::NotImportant, "compact_tq");
-        sched.install(compact_task_queue)?;
-
-        Ok(())
     }
 }
 
