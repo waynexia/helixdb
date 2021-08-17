@@ -15,6 +15,7 @@ use tokio::sync::Mutex;
 use tracing::{debug, instrument, trace};
 
 use crate::cache::{Cache, KeyCacheEntry, KeyCacheResult};
+use crate::compact_sched::CompactScheduler;
 use crate::context::Context;
 use crate::error::{HelixError, Result};
 use crate::file::{FileNo, IndexBlockBuilder, Rick, SSTable, TableBuilder};
@@ -38,7 +39,7 @@ pub struct LevelConfig {
 /// APIs require unique reference (&mut self) because this `Level` is designed
 /// to be used inside one thread (!Send). The fields should also be !Send if
 /// possible.
-pub(crate) struct Levels {
+crate struct Levels<CS: CompactScheduler> {
     tid: ThreadId,
     // todo: remove this mutex
     timestamp_reviewer: Arc<Mutex<Box<dyn TimestampReviewer>>>,
@@ -50,9 +51,10 @@ pub(crate) struct Levels {
     cache: Cache,
     write_batch: Rc<WriteBatch>,
     ts_action_sender: ChannelMeshSender<TimestampAction>,
+    compact_sched: Rc<CS>,
 }
 
-impl Levels {
+impl<CS: CompactScheduler> Levels<CS> {
     pub async fn try_new(
         tid: ThreadId,
         opts: Options,
@@ -60,6 +62,7 @@ impl Levels {
         ctx: Arc<Context>,
         ts_action_sender: ChannelMeshSender<TimestampAction>,
         level_info: Arc<Mutex<LevelInfo>>,
+        compact_sched: Rc<CS>,
     ) -> Result<Rc<Self>> {
         // todo: remove the default rick. the number in `FileNo::Rick` shouldn't be 0.
         let rick_file = ctx.file_manager.open(tid, FileNo::Rick(0)).await.unwrap();
@@ -79,6 +82,7 @@ impl Levels {
             cache,
             write_batch: Rc::new(write_batch),
             ts_action_sender,
+            compact_sched,
         };
 
         let levels = Rc::new(levels);
@@ -333,6 +337,8 @@ impl Levels {
                     };
                     self.compact(TimeRange::from((start_ts, end_ts)), level_id)
                         .await?;
+                    // todo: enable this
+                    // self.compact_sched.enqueue(level_id);
                 }
                 TimestampAction::Outdate(_) => {
                     self.propagate_action(action).await?;
@@ -352,7 +358,7 @@ impl Levels {
     ///
     /// todo: how to handle rick file is not fully covered by given time range?.
     #[instrument]
-    async fn compact(&self, range: TimeRange, level_id: LevelId) -> Result<()> {
+    crate async fn compact(&self, range: TimeRange, level_id: LevelId) -> Result<()> {
         // Keep the gate open until compact finished. The question mark (try) indicates
         // a early return once it's failed to spawn to the gate.
         let (tx, rx) = glommio::channels::local_channel::new_bounded(1);
@@ -457,6 +463,21 @@ impl Levels {
         Ok(())
     }
 
+    /// Perform compaction on the given level id.
+    ///
+    /// This procedure assume the level going to compact is inactive, which has
+    /// the level id assigned, has corresponding rick file, and may serving read
+    /// requests.
+    ///
+    /// It's not this procedure's response to switch active level. And it also
+    /// has nothing to do with memindex.
+    #[instrument]
+    crate async fn compact_level(&self, level_id: LevelId) -> Result<()> {
+        self.compact_sched.finished(level_id);
+
+        Ok(())
+    }
+
     async fn outdate(&self) -> Result<()> {
         self.level_info
             .lock()
@@ -493,7 +514,7 @@ impl Levels {
     }
 }
 
-impl std::fmt::Debug for Levels {
+impl<CS: CompactScheduler> std::fmt::Debug for Levels<CS> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Levels")
             .field("thread id", &self.tid)
@@ -624,11 +645,11 @@ impl WriteBatch {
     /// Enqueue some write requests. Then check the size limit.
     /// This will reset the timeout timer.
     #[allow(clippy::branches_sharing_code)]
-    pub async fn enqueue(
+    pub async fn enqueue<CS: CompactScheduler>(
         self: Rc<Self>,
         mut reqs: Vec<Entry>,
         tx: Sender<Result<()>>,
-        level: Rc<Levels>,
+        level: Rc<Levels<CS>>,
     ) {
         // enqueue
         let guard = self.lock.lock().await;
@@ -646,7 +667,7 @@ impl WriteBatch {
     }
 
     /// Consume all batched entries.
-    pub async fn consume(self: Rc<Self>, level: Rc<Levels>) {
+    pub async fn consume<CS: CompactScheduler>(self: Rc<Self>, level: Rc<Levels<CS>>) {
         // let mut action_guard = self.action.write().await.unwrap();
         // take contents
         let guard = self.lock.lock().await;
@@ -687,7 +708,7 @@ impl WriteBatch {
         drop(action_guard.take());
     }
 
-    async fn set_or_rearm(self: Rc<Self>, level: Rc<Levels>) {
+    async fn set_or_rearm<CS: CompactScheduler>(self: Rc<Self>, level: Rc<Levels<CS>>) {
         let mut action = self.action.write().await.unwrap();
 
         // rearm timer
@@ -711,6 +732,7 @@ mod test {
     use tempfile::tempdir;
 
     use super::*;
+    use crate::compact_sched::QueueUpCompSched;
     use crate::file::FileManager;
     use crate::fn_registry::FnRegistry;
 
@@ -752,6 +774,7 @@ mod test {
             let level_info = Arc::new(Mutex::new(
                 ctx.file_manager.open_level_info().await.unwrap(),
             ));
+            let (sched, tq) = QueueUpCompSched::default();
             let levels = Levels::try_new(
                 0,
                 Options::default(),
@@ -759,9 +782,12 @@ mod test {
                 ctx,
                 sender,
                 level_info,
+                sched.clone(),
             )
             .await
             .unwrap();
+            sched.clone().init(levels.clone());
+            sched.install(tq).unwrap();
 
             let entries = vec![
                 (1, b"key1".to_vec(), b"value1".to_vec()).into(),
@@ -816,6 +842,7 @@ mod test {
             let level_info = Arc::new(Mutex::new(
                 ctx.file_manager.open_level_info().await.unwrap(),
             ));
+            let (sched, tq) = QueueUpCompSched::default();
             let levels = Levels::try_new(
                 0,
                 Options::default(),
@@ -823,9 +850,12 @@ mod test {
                 ctx.clone(),
                 sender,
                 level_info,
+                sched.clone(),
             )
             .await
             .unwrap();
+            sched.clone().init(levels.clone());
+            sched.install(tq).unwrap();
 
             for timestamp in 0..25 {
                 levels
