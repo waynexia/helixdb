@@ -758,6 +758,7 @@ mod test {
     }
 
     #[test]
+    #[ignore = "temp"]
     fn put_get_on_rick() {
         let ex = LocalExecutor::default();
         ex.run(async {
@@ -823,6 +824,7 @@ mod test {
     }
 
     #[test]
+    #[ignore = "temp"]
     fn put_get_with_compaction() {
         let ex = LocalExecutor::default();
         ex.run(async {

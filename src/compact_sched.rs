@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::collections::VecDeque;
-use std::rc::{Rc, Weak};
+use std::mem;
+use std::rc::Rc;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -32,24 +33,40 @@ crate struct QueueUpCompSched {
     interval: Duration,
     queue: RefCell<VecDeque<LevelId>>,
     delay_num: usize,
-    levels: Weak<Levels<Self>>,
+    levels: Rc<Levels<Self>>,
     tq: TaskQueueHandle,
 }
 
 impl QueueUpCompSched {
-    crate fn new(
+    /// Create a not fully initialized instance. The return value should be
+    /// `init()` first.
+    ///
+    /// This is expected to create a "memory leak" manifests as cyclic reference
+    /// ([Self] and [Levels]) after `init()`.
+    crate unsafe fn new_zeroed(
         interval: Duration,
         delay_num: usize,
-        levels: Weak<Levels<Self>>,
         tq: TaskQueueHandle,
-    ) -> Self {
-        Self {
+    ) -> Rc<Self> {
+        Rc::new(Self {
             is_compacting: RefCell::new(false),
             interval,
             queue: RefCell::new(VecDeque::new()),
             delay_num,
-            levels,
+            levels: mem::transmute::<Rc<()>, Rc<Levels<QueueUpCompSched>>>(Rc::new(())),
             tq,
+        })
+    }
+
+    /// Initialize this with given levels.
+    crate fn init(self: Rc<Self>, levels: Rc<Levels<Self>>) {
+        unsafe {
+            let empty_rc = mem::replace(
+                &mut (*(Rc::as_ptr(&self) as *mut QueueUpCompSched)).levels,
+                // &mut self.levels,
+                levels.clone(),
+            );
+            let _ = mem::transmute::<Rc<Levels<QueueUpCompSched>>, Rc<()>>(empty_rc);
         }
     }
 
@@ -73,7 +90,7 @@ impl QueueUpCompSched {
         Local::local_into(
             async move {
                 // todo: propagate Error?
-                let _ = levels.upgrade().unwrap().compact_level(level_id);
+                let _ = levels.compact_level(level_id);
             },
             self.tq,
         )
@@ -96,7 +113,9 @@ impl QueueUpCompSched {
             interval: Duration::from_secs(1),
             queue: RefCell::new(VecDeque::new()),
             delay_num: 3,
-            levels: Weak::new(),
+            levels: unsafe {
+                std::mem::transmute::<Rc<()>, Rc<Levels<QueueUpCompSched>>>(Rc::new(()))
+            },
             tq: Local::create_task_queue(
                 glommio::Shares::default(),
                 glommio::Latency::NotImportant,

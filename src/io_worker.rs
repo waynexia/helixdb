@@ -1,6 +1,5 @@
 use std::cmp::Ordering;
-use std::ptr;
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 use std::sync::Arc;
 
 use glommio::channels::channel_mesh::{
@@ -48,15 +47,13 @@ impl IOWorker {
         ctx: Arc<Context>,
         ts_action_sender: ChannelMeshSender<TimestampAction>,
     ) -> Result<Self> {
-        let level_weak = Weak::new();
         let compact_task_queue =
             Local::create_task_queue(Shares::default(), Latency::NotImportant, "compact_tq");
-        let sched = Rc::new(QueueUpCompSched::new(
-            opts.compact_prompt_interval,
-            2,
-            level_weak.clone(),
-            compact_task_queue,
-        ));
+        // Safety:
+        // this is initialized below.
+        let sched = unsafe {
+            QueueUpCompSched::new_zeroed(opts.compact_prompt_interval, 2, compact_task_queue)
+        };
 
         let levels = Levels::try_new(
             tid,
@@ -69,9 +66,7 @@ impl IOWorker {
         )
         .await?;
 
-        unsafe {
-            ptr::write(level_weak.as_ptr() as _, Rc::as_ptr(&levels));
-        }
+        sched.clone().init(levels.clone());
         sched.install(compact_task_queue)?;
 
         Ok(Self { tid, levels })
