@@ -111,7 +111,7 @@ impl LevelInfo {
     }
 
     /// Return new level id.
-    crate async fn add_level(
+    pub(crate) async fn add_level(
         &mut self,
         start: Timestamp,
         end: Timestamp,
@@ -127,7 +127,7 @@ impl LevelInfo {
         Ok(next_id)
     }
 
-    crate async fn remove_last_level(&mut self, file_manager: &FileManager) -> Result<()> {
+    pub(crate) async fn remove_last_level(&mut self, file_manager: &FileManager) -> Result<()> {
         self.infos.pop_front();
 
         self.sync(file_manager).await

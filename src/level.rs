@@ -39,7 +39,7 @@ pub struct LevelConfig {
 /// APIs require unique reference (&mut self) because this `Level` is designed
 /// to be used inside one thread (!Send). The fields should also be !Send if
 /// possible.
-crate struct Levels<CS: CompactScheduler> {
+pub(crate) struct Levels<CS: CompactScheduler> {
     tid: ThreadId,
     // todo: remove this mutex
     timestamp_reviewer: Arc<Mutex<Box<dyn TimestampReviewer>>>,
@@ -358,7 +358,7 @@ impl<CS: CompactScheduler> Levels<CS> {
     ///
     /// todo: how to handle rick file is not fully covered by given time range?.
     #[instrument]
-    crate async fn compact(&self, range: TimeRange, level_id: LevelId) -> Result<()> {
+    pub(crate) async fn compact(&self, range: TimeRange, level_id: LevelId) -> Result<()> {
         // Keep the gate open until compact finished. The question mark (try) indicates
         // a early return once it's failed to spawn to the gate.
         let (tx, rx) = glommio::channels::local_channel::new_bounded(1);
@@ -472,7 +472,7 @@ impl<CS: CompactScheduler> Levels<CS> {
     /// It's not this procedure's response to switch active level. And it also
     /// has nothing to do with memindex.
     #[instrument]
-    crate async fn compact_level(&self, level_id: LevelId) -> Result<()> {
+    pub(crate) async fn compact_level(&self, level_id: LevelId) -> Result<()> {
         self.compact_sched.finished(level_id);
 
         Ok(())

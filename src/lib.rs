@@ -1,13 +1,9 @@
 //! HelixDB is a KV-Engine designed for time-series data.
 
-#![feature(with_options)]
 #![feature(vec_into_raw_parts)]
 #![feature(trait_alias)]
 #![feature(async_closure)]
 #![feature(core_intrinsics)]
-#![feature(new_uninit)]
-#![feature(crate_visibility_modifier)]
-#![feature(hash_drain_filter)]
 // todo: open these lints
 #![allow(dead_code)]
 #![allow(unused_variables)]

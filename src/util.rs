@@ -125,6 +125,6 @@ pub fn check_bytes_length(data: &[u8], length: usize) -> Result<()> {
     }
 }
 
-crate trait AssertSend: Send {}
+pub(crate) trait AssertSend: Send {}
 
-crate trait AssertSync: Sync {}
+pub(crate) trait AssertSync: Sync {}

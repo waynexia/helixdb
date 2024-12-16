@@ -18,7 +18,7 @@ const BINARY_FILE_EXTENSION: &str = "bin";
 
 const LEVEL_INFO_FILENAME: &str = "LEVEL_INFO";
 
-crate enum FileType {
+pub(crate) enum FileType {
     Rick,
     VLog,
     SSTable,
@@ -39,7 +39,7 @@ impl FileType {
 }
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-crate enum FileNo {
+pub(crate) enum FileNo {
     LevelInfo,
     Rick(LevelId),
     SSTable(LevelId),
@@ -55,7 +55,7 @@ impl FileNo {
     }
 }
 
-crate enum OtherType {
+pub(crate) enum OtherType {
     /// Timestamp range of each level.
     LevelInfo,
     /// Thread Identifier.
@@ -72,7 +72,7 @@ unsafe impl Sync for RawFilePtr {}
 ///
 /// It will keep opened file until a explicit garbage collection. So others
 /// needn't to close file.
-crate struct FileManager {
+pub(crate) struct FileManager {
     base_dir: PathBuf,
     // todo: GC. maybe do it when outdating some level.
     fd_pool: Arc<Mutex<HashMap<(ThreadId, FileNo), RawFilePtr>>>,
@@ -82,7 +82,7 @@ impl AssertSync for FileManager {}
 impl AssertSend for FileManager {}
 
 impl FileManager {
-    crate fn with_base_dir<P: AsRef<Path>>(base_dir: P, shards: usize) -> Result<Self> {
+    pub(crate) fn with_base_dir<P: AsRef<Path>>(base_dir: P, shards: usize) -> Result<Self> {
         fs::create_dir_all(base_dir.as_ref())?;
 
         // check dir
@@ -113,7 +113,7 @@ impl FileManager {
         })
     }
 
-    crate async fn open(&self, tid: ThreadId, file_no: FileNo) -> Result<Rc<File>> {
+    pub(crate) async fn open(&self, tid: ThreadId, file_no: FileNo) -> Result<Rc<File>> {
         if let Some(file_ptr) = self.fd_pool.lock().await.get(&(tid, file_no)) {
             return Ok(file_ptr.0.clone());
         }
@@ -136,7 +136,7 @@ impl FileManager {
     /// As [FileManager] is shared between all shards, it keep all files that
     /// should not be visible to other shards. Trying to close with wrong `tid`
     /// is undefined behavior.
-    crate async fn close_some(&self, tid: ThreadId) -> Result<()> {
+    pub(crate) async fn close_some(&self, tid: ThreadId) -> Result<()> {
         let free_list = self
             .fd_pool
             .lock()
@@ -162,7 +162,7 @@ impl FileManager {
 
     // todo: deprecate this.
     /// Open or create [LevelInfo].
-    crate async fn open_level_info(&self) -> Result<LevelInfo> {
+    pub(crate) async fn open_level_info(&self) -> Result<LevelInfo> {
         let filename = self.base_dir.join(LEVEL_INFO_FILENAME);
         let file = File::open(filename).await?;
 
@@ -177,7 +177,7 @@ impl FileManager {
 
     // todo: correct this.
     /// Refresh (overwrite) level info file.
-    crate async fn sync_level_info(&self, bytes: Bytes) -> Result<()> {
+    pub(crate) async fn sync_level_info(&self, bytes: Bytes) -> Result<()> {
         let filename = self.base_dir.join(LEVEL_INFO_FILENAME);
         let file = File::open(filename).await?;
 
