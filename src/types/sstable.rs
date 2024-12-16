@@ -86,8 +86,8 @@ impl SSTableSuperBlock {
         let blocks = fb_blocks
             .blocks()
             .unwrap()
-            .to_owned()
             .into_iter()
+            .cloned()
             .map(BlockInfo::from)
             .collect();
 
@@ -125,7 +125,7 @@ impl IndexBlockEntry {
 
         let value_offset = protos::Offset::new(self.value_offset);
         let timestamp = protos::Timestamp::new(self.timestamp);
-        let key_bytes = fbb.create_vector_direct(&self.key);
+        let key_bytes = fbb.create_vector(&self.key);
 
         let entry = protos::IndexBlockEntry::create(
             &mut fbb,
@@ -141,13 +141,12 @@ impl IndexBlockEntry {
     }
 
     pub fn decode(bytes: &[u8]) -> Self {
-        // let fb_entry = flatbuffers::get_root::<protos::IndexBlockEntry<'_>>(bytes);
         let fb_entry = flatbuffers::root::<protos::IndexBlockEntry<'_>>(bytes).unwrap();
 
         Self {
             value_offset: fb_entry.value_offset().unwrap().offset(),
             timestamp: fb_entry.timestamp().unwrap().timestamp(),
-            key: fb_entry.key().unwrap().to_vec(),
+            key: fb_entry.key().unwrap().bytes().to_vec(),
         }
     }
 }

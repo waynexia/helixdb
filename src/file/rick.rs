@@ -1,9 +1,7 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::time::Instant;
-use std::usize;
 
-use glommio::Local;
 use tracing::trace;
 
 use crate::error::Result;
@@ -202,17 +200,16 @@ impl Rick {
     /// - Traverse some entries from "start", for each entry
     ///     - suit in `range`, should be recycle.
     ///     - not suit, query index (if have) whether it is legal. Put it into
-    ///     "need rewrite" buffer if is, and discard if not.
+    ///       "need rewrite" buffer if is, and discard if not.
     /// - Acquire write lock and write those "need rewrite" to the end of file.
-    /// Then update index (if have) and sync index (if need).
+    ///   Then update index (if have) and sync index (if need).
     /// - Sync super block to update "start" and "end" pointer to make above
-    ///   change
-    /// visible. After this the write l ock can be released.
+    ///   change visible. After this the write l ock can be released.
     /// - Recycle space occupied by those offset is smaller than "start"
     ///   pointer.
     pub async fn garbage_collect(&self, range: TimeRange) -> Result<()> {
         // yield control to executor.
-        Local::yield_if_needed().await;
+        glommio::yield_if_needed().await;
 
         todo!()
     }

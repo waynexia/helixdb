@@ -1,5 +1,4 @@
 use std::convert::TryInto;
-use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;

@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use glommio::timer::TimerActionRepeat;
-use glommio::{Local, TaskQueueHandle};
+use glommio::TaskQueueHandle;
 
 use crate::error::Result;
 use crate::level::Levels;
@@ -28,7 +28,7 @@ pub(crate) trait CompactScheduler: 'static {
     }
 }
 
-crate struct QueueUpCompSched {
+pub(crate) struct QueueUpCompSched {
     is_compacting: RefCell<bool>,
     interval: Duration,
     queue: RefCell<VecDeque<LevelId>>,
@@ -43,7 +43,7 @@ impl QueueUpCompSched {
     ///
     /// This is expected to create a "memory leak" manifests as cyclic reference
     /// ([Self] and [Levels]) after `init()`.
-    crate unsafe fn new_zeroed(
+    pub(crate) unsafe fn new_zeroed(
         interval: Duration,
         delay_num: usize,
         tq: TaskQueueHandle,
@@ -59,7 +59,7 @@ impl QueueUpCompSched {
     }
 
     /// Initialize this with given levels.
-    crate fn init(self: Rc<Self>, levels: Rc<Levels<Self>>) {
+    pub(crate) fn init(self: Rc<Self>, levels: Rc<Levels<Self>>) {
         unsafe {
             let empty_rc = mem::replace(
                 &mut (*(Rc::as_ptr(&self) as *mut QueueUpCompSched)).levels,
@@ -86,10 +86,10 @@ impl QueueUpCompSched {
         *self.is_compacting.borrow_mut() = true;
 
         let levels = self.levels.clone();
-        Local::local_into(
+        glommio::spawn_local_into(
             async move {
                 // todo: propagate Error?
-                let _ = levels.compact_level(level_id);
+                let _ = levels.compact_level(level_id).await;
             },
             self.tq,
         )
@@ -106,8 +106,8 @@ impl QueueUpCompSched {
     /// Any operations make this to call `levels` will panic due to
     /// the attempt of trying to upgrade that empty weak pointer.
     #[cfg(test)]
-    crate fn default() -> (Rc<Self>, TaskQueueHandle) {
-        let tq = Local::create_task_queue(
+    pub(crate) fn default() -> (Rc<Self>, TaskQueueHandle) {
+        let tq = glommio::executor().create_task_queue(
             glommio::Shares::default(),
             glommio::Latency::NotImportant,
             "test_comp_tq",

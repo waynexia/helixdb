@@ -1,13 +1,11 @@
 //! HelixDB is a KV-Engine designed for time-series data.
 
-#![feature(with_options)]
 #![feature(vec_into_raw_parts)]
 #![feature(trait_alias)]
 #![feature(async_closure)]
+#![allow(internal_features)]
 #![feature(core_intrinsics)]
-#![feature(new_uninit)]
-#![feature(crate_visibility_modifier)]
-#![feature(hash_drain_filter)]
+#![feature(hash_extract_if)]
 // todo: open these lints
 #![allow(dead_code)]
 #![allow(unused_variables)]
@@ -18,7 +16,7 @@
 /// # Example
 /// *Notice this macro is not exported via "`#[macro_export]`" so the following
 /// example will not be run as a test case.*
-/// ```
+/// ```ignore
 /// # #![feature(never_type)]
 /// # #[macro_use] extern crate helixdb;
 /// fn return_ok_none() -> Result<Option<usize>, !> {

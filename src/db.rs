@@ -3,11 +3,10 @@ use std::intrinsics::unlikely;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::thread::JoinHandle;
 
 use futures_util::future::{join_all, try_join_all};
 use glommio::channels::channel_mesh::MeshBuilder;
-use glommio::{LocalExecutor, LocalExecutorBuilder};
+use glommio::{ExecutorJoinHandle, LocalExecutor, LocalExecutorBuilder};
 use tokio::sync::mpsc::{channel as bounded_channel, Sender};
 use tokio::sync::oneshot::channel as oneshot;
 use tokio::sync::Mutex;
@@ -85,7 +84,7 @@ unsafe impl Sync for HelixDB {}
 
 pub(crate) struct HelixCore {
     /// Join handles of shards' working threads.
-    worker_handle: Vec<JoinHandle<()>>,
+    worker_handle: Vec<ExecutorJoinHandle<()>>,
     task_txs: Vec<Sender<Task>>,
     ctx: Arc<Context>,
     is_closed: AtomicBool,
@@ -118,8 +117,7 @@ impl HelixCore {
             let mesh_builder = mesh_builder.clone();
             let level_info = level_info.clone();
 
-            let handle = LocalExecutorBuilder::new()
-                .pin_to_cpu(tid as usize)
+            let handle = LocalExecutorBuilder::new(glommio::Placement::Fixed(tid as usize))
                 .spawn(move || async move {
                     let (sender, receiver) = mesh_builder.join().await.unwrap();
                     let worker = IOWorker::try_new(tid, opts, tsr, level_info, ctx, sender)
@@ -213,7 +211,7 @@ impl HelixCore {
 
         let iters: Vec<_> = (0..self.shards())
             .map(|worker| (worker, key_range.clone()))
-            .map(async move |(worker, key_range)| -> Result<_> {
+            .map(async |(worker, key_range)| -> Result<_> {
                 let (tx, rx) = bounded_channel(opt.prefetch_buf_size);
 
                 self.task_txs[worker]
@@ -251,7 +249,9 @@ impl HelixCore {
     }
 
     fn check_closed(&self) -> Result<()> {
-        if unlikely(self.is_closed.load(Ordering::SeqCst)) {
+        // false positive
+        #[allow(unused_unsafe)]
+        if unsafe { unlikely(self.is_closed.load(Ordering::SeqCst)) } {
             return Err(HelixError::Closed);
         }
 

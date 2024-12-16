@@ -5,7 +5,6 @@ use crate::fn_registry::FnRegistry;
 use crate::level::{SimpleTimestampReviewer, TimestampReviewer, WriteBatchConfig};
 
 /// Options for opening HelixDB
-// #[derive(Debug, Clone,Copy)]
 pub struct Options {
     // parameters
     /// Number of shards. It is recommended to equal to the number of system
@@ -15,9 +14,7 @@ pub struct Options {
     pub(crate) task_buffer_size: usize,
     /// Configurations of cache.
     pub(crate) cache: CacheConfig,
-    ///
     pub(crate) write_batch: WriteBatchConfig,
-    ///
     pub(crate) compact_prompt_interval: Duration,
 
     // helixdb context

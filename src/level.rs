@@ -8,7 +8,6 @@ use std::time::Duration;
 use glommio::channels::channel_mesh::Senders as ChannelMeshSender;
 use glommio::sync::RwLock;
 use glommio::timer::TimerActionOnce;
-use glommio::Local;
 use tokio::sync::mpsc::Sender as BoundedSender;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::Mutex;
@@ -39,7 +38,7 @@ pub struct LevelConfig {
 /// APIs require unique reference (&mut self) because this `Level` is designed
 /// to be used inside one thread (!Send). The fields should also be !Send if
 /// possible.
-crate struct Levels<CS: CompactScheduler> {
+pub(crate) struct Levels<CS: CompactScheduler> {
     tid: ThreadId,
     // todo: remove this mutex
     timestamp_reviewer: Arc<Mutex<Box<dyn TimestampReviewer>>>,
@@ -116,7 +115,7 @@ impl<CS: CompactScheduler> Levels<CS> {
         let review_actions = self.timestamp_reviewer.lock().await.observe(max_timestamp);
         self.handle_actions(review_actions.clone()).await?;
 
-        Local::yield_if_needed().await;
+        glommio::yield_if_needed().await;
 
         Ok(())
     }
@@ -188,14 +187,12 @@ impl<CS: CompactScheduler> Levels<CS> {
 
         let cache_result = self.cache.get_key(time_key);
         trace!("cache result of {:?} : {:?}", time_key, cache_result);
-        let entry = match cache_result {
-            KeyCacheResult::Value(value) => {
-                return Ok(Some(Entry {
-                    timestamp: time_key.0,
-                    key: time_key.1.to_owned(),
-                    value,
-                }));
-            }
+        match cache_result {
+            KeyCacheResult::Value(value) => Ok(Some(Entry {
+                timestamp: time_key.0,
+                key: time_key.1.to_owned(),
+                value,
+            })),
             KeyCacheResult::Compressed(compressed) => {
                 let value =
                     ok_unwrap!(self.decompress_and_find(time_key, &compressed, opt.decompress)?);
@@ -289,9 +286,7 @@ impl<CS: CompactScheduler> Levels<CS> {
                     Ok(None)
                 }
             }
-        };
-
-        entry
+        }
     }
 
     /// Propagate action to other peers.
@@ -358,7 +353,7 @@ impl<CS: CompactScheduler> Levels<CS> {
     ///
     /// todo: how to handle rick file is not fully covered by given time range?.
     #[instrument]
-    crate async fn compact(&self, range: TimeRange, level_id: LevelId) -> Result<()> {
+    pub(crate) async fn compact(&self, range: TimeRange, level_id: LevelId) -> Result<()> {
         // Keep the gate open until compact finished. The question mark (try) indicates
         // a early return once it's failed to spawn to the gate.
         let (tx, rx) = glommio::channels::local_channel::new_bounded(1);
@@ -472,7 +467,7 @@ impl<CS: CompactScheduler> Levels<CS> {
     /// It's not this procedure's response to switch active level. And it also
     /// has nothing to do with memindex.
     #[instrument]
-    crate async fn compact_level(&self, level_id: LevelId) -> Result<()> {
+    pub(crate) async fn compact_level(&self, level_id: LevelId) -> Result<()> {
         self.compact_sched.finished(level_id);
 
         Ok(())
