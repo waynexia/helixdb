@@ -141,9 +141,7 @@ impl FileManager {
             .fd_pool
             .lock()
             .await
-            .drain_filter(|(thread_id, _), file| {
-                *thread_id == tid && Rc::strong_count(&file.0) == 1
-            })
+            .extract_if(|(thread_id, _), file| *thread_id == tid && Rc::strong_count(&file.0) == 1)
             .collect::<Vec<_>>();
 
         for (_, file) in free_list {

@@ -3,7 +3,6 @@ use std::rc::Rc;
 use std::time::Instant;
 use std::usize;
 
-use glommio::Local;
 use tracing::trace;
 
 use crate::error::Result;
@@ -212,7 +211,7 @@ impl Rick {
     ///   pointer.
     pub async fn garbage_collect(&self, range: TimeRange) -> Result<()> {
         // yield control to executor.
-        Local::yield_if_needed().await;
+        glommio::yield_if_needed().await;
 
         todo!()
     }

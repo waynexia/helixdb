@@ -7,7 +7,7 @@ use glommio::channels::channel_mesh::{
     Senders as ChannelMeshSender,
 };
 use glommio::sync::Gate;
-use glommio::{Latency, Local, Shares, Task as GlommioTask};
+use glommio::{Latency, Shares, Task as GlommioTask};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::oneshot::Sender as Notifier;
 use tokio::sync::Mutex;
@@ -47,8 +47,11 @@ impl IOWorker {
         ctx: Arc<Context>,
         ts_action_sender: ChannelMeshSender<TimestampAction>,
     ) -> Result<Self> {
-        let compact_task_queue =
-            Local::create_task_queue(Shares::default(), Latency::NotImportant, "compact_tq");
+        let compact_task_queue = glommio::executor().create_task_queue(
+            Shares::default(),
+            Latency::NotImportant,
+            "compact_tq",
+        );
         // Safety:
         // this is initialized below.
         let sched = unsafe {
@@ -87,7 +90,7 @@ impl IOWorker {
         for rx in connected_receivers {
             let levels = self.levels.clone();
             let tid = self.tid;
-            GlommioTask::local(async move {
+            glommio::spawn_local(async move {
                 while let Some(action) = rx.recv().await {
                     trace!("{} received action {:?}", tid, action);
                     let _ = levels.handle_actions(vec![action]).await;
@@ -190,7 +193,7 @@ mod test {
 
         for _ in 0..7 {
             let mesh_builder = mesh_builder.clone();
-            LocalExecutorBuilder::new()
+            LocalExecutorBuilder::new(glommio::Placement::Unbound)
                 .spawn(move || async move {
                     let (_, mut rx) = mesh_builder.join().await.unwrap();
 
@@ -214,7 +217,7 @@ mod test {
                 .unwrap();
         }
 
-        LocalExecutorBuilder::new()
+        LocalExecutorBuilder::new(glommio::Placement::Unbound)
             .spawn(move || async move {
                 let (tx, _) = mesh_builder.join().await.unwrap();
 

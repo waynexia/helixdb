@@ -80,9 +80,9 @@ impl LevelInfo {
         let infos = fb_info
             .infos()
             .unwrap()
-            .to_owned()
             .into_iter()
             .rev() // `fbb.push()` in encode reversed the order
+            .cloned()
             .map(LevelDesc::from)
             .collect();
 

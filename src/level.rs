@@ -8,7 +8,6 @@ use std::time::Duration;
 use glommio::channels::channel_mesh::Senders as ChannelMeshSender;
 use glommio::sync::RwLock;
 use glommio::timer::TimerActionOnce;
-use glommio::Local;
 use tokio::sync::mpsc::Sender as BoundedSender;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::Mutex;
@@ -116,7 +115,7 @@ impl<CS: CompactScheduler> Levels<CS> {
         let review_actions = self.timestamp_reviewer.lock().await.observe(max_timestamp);
         self.handle_actions(review_actions.clone()).await?;
 
-        Local::yield_if_needed().await;
+        glommio::yield_if_needed().await;
 
         Ok(())
     }

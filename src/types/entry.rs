@@ -27,8 +27,8 @@ impl Entry {
         let mut fbb = FlatBufferBuilder::new();
 
         let timestamp = protos::Timestamp::new(self.timestamp);
-        let key_bytes = fbb.create_vector_direct(&self.key);
-        let value_bytes = fbb.create_vector_direct(&self.value);
+        let key_bytes = fbb.create_vector(&self.key);
+        let value_bytes = fbb.create_vector(&self.value);
 
         let entry = protos::Entry::create(
             &mut fbb,
@@ -49,8 +49,8 @@ impl Entry {
 
         Self {
             timestamp: fb_entry.timestamp().unwrap().timestamp(),
-            key: fb_entry.key().unwrap().to_vec(),
-            value: fb_entry.value().unwrap().to_vec(),
+            key: fb_entry.key().unwrap().bytes().to_vec(),
+            value: fb_entry.value().unwrap().bytes().to_vec(),
         }
     }
 

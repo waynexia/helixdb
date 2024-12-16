@@ -4,6 +4,7 @@
 #![feature(trait_alias)]
 #![feature(async_closure)]
 #![feature(core_intrinsics)]
+#![feature(hash_extract_if)]
 // todo: open these lints
 #![allow(dead_code)]
 #![allow(unused_variables)]
