@@ -52,7 +52,8 @@ impl Panel {
         }
     }
 
-    pub fn reset(&mut self, amount: usize) {
+    #[allow(dead_code)]
+    pub fn reset(&mut self, _amount: usize) {
         todo!()
     }
 
@@ -114,6 +115,7 @@ impl DiskMonitor {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 struct DiskRecord {
     read_req: usize,

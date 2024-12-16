@@ -211,7 +211,7 @@ impl HelixCore {
 
         let iters: Vec<_> = (0..self.shards())
             .map(|worker| (worker, key_range.clone()))
-            .map(async move |(worker, key_range)| -> Result<_> {
+            .map(async |(worker, key_range)| -> Result<_> {
                 let (tx, rx) = bounded_channel(opt.prefetch_buf_size);
 
                 self.task_txs[worker]
@@ -249,6 +249,8 @@ impl HelixCore {
     }
 
     fn check_closed(&self) -> Result<()> {
+        // false positive
+        #[allow(unused_unsafe)]
         if unsafe { unlikely(self.is_closed.load(Ordering::SeqCst)) } {
             return Err(HelixError::Closed);
         }

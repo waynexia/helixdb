@@ -89,7 +89,7 @@ impl QueueUpCompSched {
         glommio::spawn_local_into(
             async move {
                 // todo: propagate Error?
-                let _ = levels.compact_level(level_id);
+                let _ = levels.compact_level(level_id).await;
             },
             self.tq,
         )

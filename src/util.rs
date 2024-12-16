@@ -13,7 +13,7 @@ pub(crate) trait KeyExtractor<T: Borrow<Self>>: Eq {
 
 impl<T: Index<usize, Output = Entry> + Borrow<Vec<Entry>>> KeyExtractor<T> for Vec<Entry> {
     fn key(data: &T) -> &[u8] {
-        &(*data.index(0)).key
+        &data.index(0).key
     }
 }
 
@@ -38,7 +38,7 @@ impl<C: Comparator, T: Eq + KeyExtractor<T>> Ord for OrderingHelper<C, T> {
 
 impl<C: Comparator, T: PartialEq + KeyExtractor<T>> PartialOrd for OrderingHelper<C, T> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(C::cmp(T::key(&self.data), T::key(&other.data)))
+        Some(self.cmp(other))
     }
 }
 

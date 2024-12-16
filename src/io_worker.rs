@@ -7,7 +7,7 @@ use glommio::channels::channel_mesh::{
     Senders as ChannelMeshSender,
 };
 use glommio::sync::Gate;
-use glommio::{Latency, Shares, Task as GlommioTask};
+use glommio::{Latency, Shares};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::oneshot::Sender as Notifier;
 use tokio::sync::Mutex;

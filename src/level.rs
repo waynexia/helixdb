@@ -187,14 +187,12 @@ impl<CS: CompactScheduler> Levels<CS> {
 
         let cache_result = self.cache.get_key(time_key);
         trace!("cache result of {:?} : {:?}", time_key, cache_result);
-        let entry = match cache_result {
-            KeyCacheResult::Value(value) => {
-                return Ok(Some(Entry {
-                    timestamp: time_key.0,
-                    key: time_key.1.to_owned(),
-                    value,
-                }));
-            }
+        match cache_result {
+            KeyCacheResult::Value(value) => Ok(Some(Entry {
+                timestamp: time_key.0,
+                key: time_key.1.to_owned(),
+                value,
+            })),
             KeyCacheResult::Compressed(compressed) => {
                 let value =
                     ok_unwrap!(self.decompress_and_find(time_key, &compressed, opt.decompress)?);
@@ -288,9 +286,7 @@ impl<CS: CompactScheduler> Levels<CS> {
                     Ok(None)
                 }
             }
-        };
-
-        entry
+        }
     }
 
     /// Propagate action to other peers.
