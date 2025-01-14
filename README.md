@@ -1,4 +1,4 @@
-<img src="docs/image/helix_logo.jpg" height="100" width="100" style="display: block;  margin-left: auto;  margin-right: auto;">
+<img src="docs/image/Helix_DB_Logo_Proposal_Wordart.svg" height="200" style="display: block;  margin-left: auto;  margin-right: auto;">
 
 # HelixDB
 
